@@ -16,6 +16,7 @@ from .settings import build_store
 from .supabase_store import StorageUnavailable
 from .worker import process_one
 from .public_scout import scan_once, snapshot
+from .data_services import SERVICES, require_service
 
 WEB = Path(__file__).parent / 'web.html'
 
@@ -26,7 +27,7 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
             # Do not log URLs, authorization or customer data.
             logging.info('HTTP %s', args[1] if len(args) > 1 else '')
 
-        def respond(self, status, content, content_type='application/json; charset=utf-8'):
+        def respond(self, status, content, content_type='application/json; charset=utf-8', filename=None):
             data = content if isinstance(content, bytes) else json.dumps(content, ensure_ascii=False).encode()
             self.send_response(status)
             self.send_header('Content-Type', content_type)
@@ -35,7 +36,9 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
             self.send_header('X-Content-Type-Options', 'nosniff')
             self.send_header('Referrer-Policy', 'no-referrer')
             self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
-            if content_type.startswith('text/csv'):
+            if filename:
+                self.send_header('Content-Disposition', 'attachment; filename="' + filename + '"')
+            elif content_type.startswith('text/csv'):
                 self.send_header('Content-Disposition', 'attachment; filename="company-x2-result.csv"')
             self.end_headers()
             self.wfile.write(data)
@@ -86,7 +89,7 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
             if path == '/api/health':
                 if not store.ping():
                     return self.respond(503, {'status': 'storage_unavailable'})
-                return self.respond(200, {'status': 'ok', 'endpoint': 'E03', 'mode': 'sandbox',
+                return self.respond(200, {'status': 'ok', 'endpoint': 'E04', 'mode': 'sandbox',
                     'storage': 'supabase' if hasattr(store, 'rpc') else 'sqlite',
                     'payments_enabled': False, 'outreach_enabled': False, 'ai_connected': False})
             if not self.access_allowed():
@@ -95,6 +98,14 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
                 return self.respond(200, WEB.read_bytes(), 'text/html; charset=utf-8')
             if path == '/api/scout':
                 return self.respond(200, snapshot(store, enabled=scout_enabled))
+            if path == '/api/services':
+                try:
+                    ready = store.services_ready()
+                except (StorageUnavailable, ValueError):
+                    ready = False
+                return self.respond(200, {'items': [{'key': key, **service,
+                    'available': ready or key == 'csv_exact_dedup'} for key, service in SERVICES.items()],
+                    'error': None if ready else '追加サービス用SQL（004_data_services.sql）の適用と接続設定を確認してください。'})
             if path == '/api/opportunities':
                 if not secrets.compare_digest(self.headers.get('X-Admin-Token', self.token()), admin_token):
                     return self.respond(401, {'error': 'Admin token required'})
@@ -107,9 +118,20 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
                 if len(parts) == 4:
                     if parts[3] != 'download' or order['status'] != 'ready':
                         return self.respond(409, {'error': 'Artifact unavailable'})
+                    service_key = order.get('service_key', 'csv_exact_dedup')
+                    if 'artifact' in order['result']:
+                        artifact = order['result']['artifact']
+                        # Metadata comes from a fixed service catalog, never raw HTTP inputs.
+                        from .data_services import make_artifact
+                        trusted = make_artifact(artifact['content'], service_key)
+                        encoding = 'utf-8-sig' if SERVICES[service_key]['format'] == 'csv' else 'utf-8'
+                        return self.respond(200, trusted['content'].encode(encoding), trusted['content_type'],
+                                            filename='company-x2-result.csv' if service_key == 'csv_exact_dedup' else trusted['filename'])
                     return self.respond(200, order['result']['csv'].encode('utf-8-sig'), 'text/csv; charset=utf-8')
                 if order['result']:
                     order['result'] = {k: v for k, v in order['result'].items() if k != 'csv'}
+                    if 'artifact' in order['result']:
+                        order['result']['artifact'] = {k: v for k, v in order['result']['artifact'].items() if k != 'content'}
                 return self.respond(200, order)
             return self.respond(404, {'error': 'Not found'})
 
@@ -135,7 +157,8 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
                     text, key, token = data.get('csv'), data.get('request_key'), self.token()
                     if not isinstance(text, str) or not isinstance(key, str) or len(text.encode()) > MAX_BYTES:
                         raise ValueError('CSV input limit exceeded or invalid request')
-                    order_id = store.submit(text, key, token)
+                    service_key = require_service(data.get('service_key', 'csv_exact_dedup'))
+                    order_id = store.submit(text, key, token, service_key)
                     return self.respond(202, {'id': order_id, 'mode': 'sandbox', 'revenue_jpy': 0})
                 if path == '/api/opportunities':
                     if not secrets.compare_digest(self.headers.get('X-Admin-Token', self.token()), admin_token):
@@ -200,7 +223,7 @@ def main():
     scout_thread = threading.Thread(target=scout_worker, daemon=True) if scout_enabled else None
     if scout_thread:
         scout_thread.start()
-    print(f'Company X2 E03 sandbox listening on {args.host}:{server.server_port}', flush=True)
+    print(f'Company X2 E04 sandbox listening on {args.host}:{server.server_port}', flush=True)
     if not public:
         print(f'Local discovery admin token: {admin_token}', flush=True)
     try:

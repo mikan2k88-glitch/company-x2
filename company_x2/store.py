@@ -7,6 +7,7 @@ import time
 from datetime import datetime, timezone
 from contextlib import contextmanager
 from pathlib import Path
+from .data_services import require_service
 
 
 class Store:
@@ -39,6 +40,8 @@ class Store:
             );
             insert or ignore into scout_state(id) values(1);
             ''')
+            if 'service_key' not in {r['name'] for r in db.execute('pragma table_info(orders)')}:
+                db.execute("alter table orders add column service_key text not null default 'csv_exact_dedup'")
 
     @contextmanager
     def connect(self):
@@ -55,10 +58,18 @@ class Store:
     def digest(text):
         return hashlib.sha256(text.encode()).hexdigest()
 
-    def submit(self, text, request_key, token):
+    @staticmethod
+    def request_digest(text, service_key):
+        return Store.digest(text if service_key == 'csv_exact_dedup' else service_key + '\0' + text)
+
+    def services_ready(self):
+        return True
+
+    def submit(self, text, request_key, token, service_key='csv_exact_dedup'):
+        require_service(service_key)
         if not 16 <= len(request_key) <= 128 or not 32 <= len(token) <= 128:
             raise ValueError('Invalid request key or access token')
-        request_hash = self.digest(text)
+        request_hash = self.request_digest(text, service_key)
         token_hash = self.digest(token)
         with self.connect() as db:
             db.execute('begin immediate')
@@ -68,15 +79,15 @@ class Store:
                     raise ValueError('Request key already used for different content or owner')
                 return existing['id']
             order_id = secrets.token_urlsafe(18)
-            db.execute('insert into orders(id,token_hash,request_key,request_hash,status,input) values(?,?,?,?,?,?)',
-                       (order_id, token_hash, request_key, request_hash, 'queued', text))
+            db.execute('insert into orders(id,token_hash,request_key,request_hash,status,input,service_key) values(?,?,?,?,?,?,?)',
+                       (order_id, token_hash, request_key, request_hash, 'queued', text, service_key))
             db.execute('insert into events(order_id,kind) values(?,?)', (order_id, 'sandbox_order_received'))
             return order_id
 
     def claim(self):
         with self.connect() as db:
             db.execute('begin immediate')
-            row = db.execute("select id,input from orders where status='queued' order by created_at,id limit 1").fetchone()
+            row = db.execute("select id,input,service_key from orders where status='queued' order by created_at,id limit 1").fetchone()
             if not row:
                 return None
             db.execute("update orders set status='processing',updated_at=CURRENT_TIMESTAMP where id=?", (row['id'],))
@@ -111,7 +122,7 @@ class Store:
             result = json.loads(row['result']) if row['result'] else None
             events = [dict(e) for e in db.execute('select kind,created_at from events where order_id=? order by id', (order_id,))]
             return {'id': row['id'], 'status': row['status'], 'error': row['error'],
-                    'result': result, 'events': events, 'mode': 'sandbox', 'revenue_jpy': 0}
+                    'service_key': row['service_key'], 'result': result, 'events': events, 'mode': 'sandbox', 'revenue_jpy': 0}
 
     def save_opportunity(self, candidate, decision, reason):
         with self.connect() as db:

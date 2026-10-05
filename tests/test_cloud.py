@@ -57,6 +57,35 @@ class CloudTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 SupabaseStore(url, key)
 
+    def test_new_services_use_separate_queue_and_legacy_orders_still_route(self):
+        seen = []
+        def opener(req, timeout):
+            seen.append((req.full_url, json.loads(req.data)))
+            action = json.loads(req.data)['p_action']
+            return io.BytesIO(json.dumps('svc_one' if action == 'submit' else {
+                'id':'old', 'status':'ready'} if action == 'get' else True).encode())
+        store = SupabaseStore('https://example.supabase.co','sb_secret_test',opener=opener)
+        store.submit('a\n001\n','k'*32,'t'*32,'csv_to_json')
+        self.assertTrue(seen[-1][0].endswith('cx2_services'))
+        self.assertEqual(seen[-1][1]['p_payload']['service_key'],'csv_to_json')
+        store.finish('svc_one',result={},lease='lease')
+        self.assertTrue(seen[-1][0].endswith('cx2_services'))
+        store.submit('a\n001\n','x'*32,'t'*32)
+        self.assertTrue(seen[-1][0].endswith('cx2_store'))
+        saved = store.get('old','t'*32)
+        self.assertEqual(saved['service_key'],'csv_exact_dedup')
+
+    def test_missing_services_migration_keeps_legacy_worker_available(self):
+        def opener(req, timeout):
+            if req.full_url.endswith('cx2_services'):
+                raise urllib.error.HTTPError(req.full_url,404,'missing',{},io.BytesIO())
+            return io.BytesIO(b'null')
+        store = SupabaseStore('https://example.supabase.co','sb_secret_test',opener=opener)
+        self.assertIsNone(store.claim())
+        with self.assertRaises(StorageUnavailable) as error:
+            store.services_ready()
+        self.assertIn('004_data_services.sql',str(error.exception))
+
     def test_http_diagnostics_retain_status_but_not_body_or_key(self):
         for status in (401, 403, 404, 429, 500):
             def opener(req, timeout):
@@ -81,7 +110,7 @@ class CloudTests(unittest.TestCase):
             headers = {'Host': 'company-x2.onrender.com'}
             try:
                 with urllib.request.urlopen(urllib.request.Request(base+'/api/health',headers=headers)) as response:
-                    self.assertEqual(json.load(response)['endpoint'], 'E03')
+                    self.assertEqual(json.load(response)['endpoint'], 'E04')
                 with self.assertRaises(urllib.error.HTTPError) as unauthorized:
                     urllib.request.urlopen(urllib.request.Request(base+'/',headers=headers))
                 self.assertEqual(unauthorized.exception.code, 401)
