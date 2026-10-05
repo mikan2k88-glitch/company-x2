@@ -27,7 +27,7 @@ class PostgresTests(unittest.TestCase):
 
     def rpc(self, action, payload=None):
         data = json.dumps(payload or {}).replace("'", "''")
-        response = self.sql(f"set role service_role; select public.cx2_store('{action}','{data}'::jsonb);")
+        response = self.sql(f"set role service_role; select coalesce(public.cx2_store('{action}','{data}'::jsonb),'null'::jsonb);")
         return json.loads(response.stdout.splitlines()[-1])
 
     def submit(self):
@@ -61,3 +61,4 @@ class PostgresTests(unittest.TestCase):
         result = self.sql("set role anon; select public.cx2_store('ping');",check=False)
         self.assertNotEqual(result.returncode,0)
         self.assertIn('permission denied', result.stderr)
+
