@@ -1,5 +1,6 @@
 """Evaluate real structured listings. Never invent customers or send proposals."""
 from urllib.parse import urlparse
+from .data_services import SERVICES
 
 
 def qualify(candidate):
@@ -11,7 +12,7 @@ def qualify(candidate):
     parsed = urlparse(candidate['url'])
     if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password:
         raise ValueError('Listing URL must be HTTPS without credentials')
-    if candidate['service_key'] != 'csv_exact_dedup':
+    if candidate['service_key'] not in SERVICES:
         return 'rejected', 'Unsupported service'
     budget = candidate.get('budget_jpy')
     cost = candidate.get('estimated_cost_jpy')

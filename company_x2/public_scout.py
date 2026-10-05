@@ -69,9 +69,14 @@ def normalize(issue, checked_at):
     reward = re.search(r'(?:USD\s*|\$|JPY\s*|¥|€|£)\d[\d,]*(?:\.\d{1,2})?(?:\s*[kK]\b)?', title + '\n' + body)
     csv_match = bool(re.search(r'\bcsv\b', text))
     dedup_match = bool(re.search(r'\b(?:deduplicat\w*|dedup|duplicates?|duplicate\s+rows)\b|重複', text))
+    trim_match = bool(re.search(r'\b(?:trim|whitespace|leading spaces|trailing spaces)\b|空白', text))
+    json_match = bool(re.search(r'csv\s*(?:to|→|から)\s*json|convert.{0,60}csv.{0,60}json', text))
+    audit_match = bool(re.search(r'\b(?:audit|data quality|missing values|empty cells|validate csv)\b|データ検査|空欄', text))
+    service_keys = [key for key, match in [('csv_exact_dedup',dedup_match),('csv_trim',trim_match),
+                    ('csv_to_json',json_match),('csv_audit',audit_match)] if csv_match and match]
     software = bool(re.search(r'\b(?:implement|feature|bug|pull request|codebase|sdk|pipeline|refactor)\b', title.lower()))
     checks = ['報酬の支払い条件と支払者を確認', 'AIによる作業・応募の可否を確認',
-              '入力ファイル、期限、サイズ、完全一致の条件を確認']
+              '入力ファイル、期限、サイズと選択サービスの処理条件を確認']
     if issue.get('locked') or issue.get('assignees'):
         decision, reason = 'blocked', '担当者がいる、または募集への参加が制限されています'
     elif not csv_match:
@@ -80,12 +85,13 @@ def normalize(issue, checked_at):
         decision, reason = 'rejected', 'ソフトウェア改修を要求しており、現在のCSV加工サービスの範囲を超えます'
     elif not reward:
         decision, reason = 'blocked', '報酬額・通貨の記載を確認できません。bountyラベルだけでは有料案件と判断しません'
-    elif not dedup_match:
-        decision, reason = 'rejected', 'CSV関連ですが、完全一致の重複除去との適合を確認できません'
+    elif not service_keys:
+        decision, reason = 'rejected', 'CSV関連ですが、重複除去・空白整形・JSON変換・データ検査との適合を確認できません'
     else:
-        decision, reason = 'needs_review', 'CSVと重複除去の記載があります。作業範囲・報酬・応募条件は未確認です'
+        decision, reason = 'needs_review', 'CSV処理サービスに関連する記載があります。作業範囲・報酬・応募条件は未確認です'
     return {'source': SOURCE, 'external_id': str(issue['id']), 'url': url, 'title': title,
-            'description': body, 'labels': labels, 'service_key': 'csv_exact_dedup',
+            'description': body, 'labels': labels, 'service_key': service_keys[0] if service_keys else None,
+            'service_keys': service_keys,
             'reward_mention': reward.group(0) if reward else None,
             'reward_verified': False, 'automated_proposals_allowed': False,
             'proposal_sent': False, 'source_checked_at': checked_at,
