@@ -42,7 +42,14 @@ class SupabaseStore:
             # Never log bodies: they may include inputs or credential details.
             if exc.code == 400:
                 raise ValueError('Storage rejected request; check input or idempotency key') from None
-            raise StorageUnavailable('Supabase request failed; verify key and migration') from None
+            hints = {
+                401: 'Authentication rejected: verify server key and project URL match',
+                403: 'Permission denied: use a server secret/service-role key and verify cx2_store grant',
+                404: 'RPC unavailable: apply 002_sandbox_rpc.sql in this project and reload the API schema',
+                429: 'Supabase rate limit reached; retry later',
+            }
+            hint = hints.get(exc.code, 'Supabase service failed; verify project availability')
+            raise StorageUnavailable(f'Supabase HTTP {exc.code}: {hint}') from None
         except (urllib.error.URLError, TimeoutError, ValueError):
             raise StorageUnavailable('Supabase unavailable') from None
 

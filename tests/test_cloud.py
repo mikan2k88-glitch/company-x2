@@ -57,6 +57,18 @@ class CloudTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 SupabaseStore(url, key)
 
+    def test_http_diagnostics_retain_status_but_not_body_or_key(self):
+        for status in (401, 403, 404, 429, 500):
+            def opener(req, timeout):
+                raise urllib.error.HTTPError(req.full_url, status, 'sensitive-body', {}, io.BytesIO(b'secret-customer'))
+            store = SupabaseStore('https://example.supabase.co', 'sb_secret_private', opener=opener)
+            with self.assertRaises(StorageUnavailable) as error:
+                store.ping()
+            self.assertIn(str(status), str(error.exception))
+            self.assertNotIn('private', str(error.exception))
+            self.assertNotIn('sensitive', str(error.exception))
+            self.assertNotIn('secret-customer', str(error.exception))
+
     def test_render_host_password_and_order_token_coexist(self):
         import base64
         with tempfile.TemporaryDirectory() as temp:
@@ -82,3 +94,4 @@ class CloudTests(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 thread.join()
+
