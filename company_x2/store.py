@@ -3,6 +3,8 @@ import hashlib
 import json
 import secrets
 import sqlite3
+import time
+from datetime import datetime, timezone
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -30,6 +32,12 @@ class Store:
                 created_at text not null default CURRENT_TIMESTAMP,
                 primary key(source, external_id)
             );
+            create table if not exists scout_state (
+                id integer primary key check(id=1), status text not null default 'waiting',
+                lease text, lease_until real, next_run_at real not null default 0,
+                last_attempt_at real, last_success_at real, error text, report text
+            );
+            insert or ignore into scout_state(id) values(1);
             ''')
 
     @contextmanager
@@ -115,3 +123,50 @@ class Store:
         with self.connect() as db:
             return [{**json.loads(r['data']), 'decision': r['decision'], 'reason': r['reason']}
                     for r in db.execute('select * from opportunities order by created_at desc limit 100')]
+
+    def claim_scan(self):
+        now = time.time()
+        lease = secrets.token_urlsafe(24)
+        with self.connect() as db:
+            db.execute('begin immediate')
+            changed = db.execute("update scout_state set status='running',lease=?,lease_until=?,last_attempt_at=?,error=null "
+                                 'where id=1 and next_run_at<=? and (lease_until is null or lease_until<?)',
+                                 (lease, now + 180, now, now, now))
+            return lease if changed.rowcount else None
+
+    def finish_scan(self, lease, *, items=None, report=None, error=None, delay=3600):
+        now = time.time()
+        if error is None and (not isinstance(items, list) or len(items) > 30
+                or any(c.get('source') != 'github_public_bounty' or not c.get('external_id', '').isdigit()
+                       or c.get('decision') not in ('needs_review', 'blocked', 'rejected') for c in items)):
+            raise ValueError('Invalid scout batch')
+        with self.connect() as db:
+            db.execute('begin immediate')
+            row = db.execute('select * from scout_state where id=1').fetchone()
+            if not row['lease'] or row['lease'] != lease or row['lease_until'] <= now:
+                raise ValueError('Invalid scout lease')
+            if error is None:
+                db.execute("delete from opportunities where source='github_public_bounty'")
+                for c in items:
+                    db.execute('insert into opportunities(source,external_id,data,decision,reason) values(?,?,?,?,?)',
+                               (c['source'], c['external_id'], json.dumps(c), c['decision'], c['reason']))
+                db.execute("update scout_state set status='completed',last_success_at=?,report=?,error=null where id=1",
+                           (now, json.dumps(report)))
+            else:
+                db.execute("update scout_state set status='retry_wait',error=? where id=1", (str(error)[:300],))
+            db.execute('update scout_state set lease=null,lease_until=null,next_run_at=? where id=1',
+                       (now + max(300, min(86400, delay)),))
+
+    def scan_snapshot(self):
+        with self.connect() as db:
+            # One read transaction keeps report and current items consistent.
+            db.execute('begin')
+            row = dict(db.execute('select * from scout_state where id=1').fetchone())
+            items = [json.loads(r['data']) for r in db.execute(
+                "select data from opportunities where source='github_public_bounty' order by external_id")]
+        if row['status'] == 'running' and row['lease_until'] < time.time():
+            row['status'] = 'retry_wait'
+        for key in ('next_run_at', 'last_attempt_at', 'last_success_at'):
+            row[key] = datetime.fromtimestamp(row[key], timezone.utc).isoformat() if row[key] else None
+        return {k: row[k] for k in ('status', 'next_run_at', 'last_attempt_at', 'last_success_at', 'error')} | {
+            'report': json.loads(row['report']) if row['report'] else None, 'items': items}

@@ -21,9 +21,11 @@ class PostgresTests(unittest.TestCase):
         cls.sql("create role anon; create role authenticated; create role service_role;")
         migration = Path('supabase/migrations/002_sandbox_rpc.sql').read_text()
         cls.sql(migration)
+        cls.sql(Path('supabase/migrations/003_public_scout.sql').read_text())
 
     def setUp(self):
         self.sql('truncate company_x2.sandbox_events,company_x2.sandbox_orders cascade;')
+        self.sql("delete from company_x2.sandbox_opportunities; delete from company_x2.scout_state; insert into company_x2.scout_state(id) values(1);")
 
     def rpc(self, action, payload=None):
         data = json.dumps(payload or {}).replace("'", "''")
@@ -62,3 +64,37 @@ class PostgresTests(unittest.TestCase):
         self.assertNotEqual(result.returncode,0)
         self.assertIn('permission denied', result.stderr)
 
+    def scout_rpc(self, action, payload=None):
+        data = json.dumps(payload or {}).replace("'", "''")
+        response = self.sql(f"set role service_role; select coalesce(public.cx2_scout('{action}','{data}'::jsonb),'null'::jsonb);")
+        return json.loads(response.stdout.splitlines()[-1])
+
+    def test_scout_lease_atomic_save_schedule_and_failure(self):
+        lease = self.scout_rpc('claim')
+        self.assertIsNone(self.scout_rpc('claim'))
+        candidate = {'source':'github_public_bounty','external_id':'123','title':'CSV','decision':'blocked','reason':'unknown'}
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.scout_rpc('finish', {'lease':lease,'items':[candidate,candidate],'report':{}})
+        self.assertEqual(self.scout_rpc('snapshot')['status'], 'running')
+        self.assertEqual(self.scout_rpc('snapshot')['items'], [])
+        self.scout_rpc('finish', {'lease':lease,'items':[candidate],'report':{'collected':1}})
+        self.assertEqual(len(self.scout_rpc('snapshot')['items']),1)
+        self.assertIsNone(self.scout_rpc('claim'))
+        self.sql("update company_x2.scout_state set next_run_at=now()-interval '1 second';")
+        second = self.scout_rpc('claim')
+        self.scout_rpc('finish', {'lease':second,'error':'Source unavailable','delay':300})
+        saved = self.scout_rpc('snapshot')
+        self.assertEqual(saved['status'],'retry_wait')
+        self.assertIsNotNone(saved['last_success_at'])
+        self.assertEqual(len(saved['items']),1)
+
+    def test_scout_expired_worker_and_anonymous_cannot_publish(self):
+        first = self.scout_rpc('claim')
+        self.sql("update company_x2.scout_state set lease_until=now()-interval '1 second';")
+        second = self.scout_rpc('claim')
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.scout_rpc('finish', {'lease':first,'items':[],'report':{}})
+        self.scout_rpc('finish', {'lease':second,'items':[],'report':{}})
+        self.assertNotEqual(self.sql("set role anon; select public.cx2_scout('snapshot');",check=False).returncode,0)
+        # The existing order RPC still uses schema 2.
+        self.assertEqual(self.rpc('ping'), {'schema_version':2})

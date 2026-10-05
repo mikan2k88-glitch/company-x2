@@ -15,11 +15,12 @@ from .discovery import qualify
 from .settings import build_store
 from .supabase_store import StorageUnavailable
 from .worker import process_one
+from .public_scout import scan_once, snapshot
 
 WEB = Path(__file__).parent / 'web.html'
 
 
-def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None):
+def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, scout_enabled=True):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
             # Do not log URLs, authorization or customer data.
@@ -85,13 +86,15 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None):
             if path == '/api/health':
                 if not store.ping():
                     return self.respond(503, {'status': 'storage_unavailable'})
-                return self.respond(200, {'status': 'ok', 'endpoint': 'E02', 'mode': 'sandbox',
+                return self.respond(200, {'status': 'ok', 'endpoint': 'E03', 'mode': 'sandbox',
                     'storage': 'supabase' if hasattr(store, 'rpc') else 'sqlite',
                     'payments_enabled': False, 'outreach_enabled': False, 'ai_connected': False})
             if not self.access_allowed():
                 return
             if path == '/':
                 return self.respond(200, WEB.read_bytes(), 'text/html; charset=utf-8')
+            if path == '/api/scout':
+                return self.respond(200, snapshot(store, enabled=scout_enabled))
             if path == '/api/opportunities':
                 if not secrets.compare_digest(self.headers.get('X-Admin-Token', self.token()), admin_token):
                     return self.respond(401, {'error': 'Admin token required'})
@@ -166,12 +169,13 @@ def main():
     if public and (not password or len(password) < 32 or not hosts):
         raise ValueError('Public trial requires APP_ACCESS_TOKEN (32+ chars) and ALLOWED_HOSTS or RENDER_EXTERNAL_HOSTNAME')
     store = build_store(local_path=args.db)
+    scout_enabled = os.environ.get('SCOUT_ENABLED', 'true').lower() == 'true'
     if not store.ping():
         raise ValueError('Storage schema check failed')
     stop = threading.Event()
     # Bind before recovery, so a second instance cannot reset an active worker on this port.
     server = ThreadingHTTPServer((args.host, args.port), handler_for(store, admin_token,
-        allowed_hosts=hosts, access_password=password if public else None))
+        allowed_hosts=hosts, access_password=password if public else None, scout_enabled=scout_enabled))
     server.daemon_threads = True
     store.recover()
     def worker():
@@ -184,7 +188,19 @@ def main():
                 stop.wait(5)
     thread = threading.Thread(target=worker, daemon=True)
     thread.start()
-    print(f'Company X2 E02 sandbox listening on {args.host}:{server.server_port}', flush=True)
+    def scout_worker():
+        while not stop.is_set():
+            try:
+                scan_once(store)
+            except Exception:
+                logging.warning('Public scout unavailable; order processing continues')
+                stop.wait(300)
+                continue
+            stop.wait(30)
+    scout_thread = threading.Thread(target=scout_worker, daemon=True) if scout_enabled else None
+    if scout_thread:
+        scout_thread.start()
+    print(f'Company X2 E03 sandbox listening on {args.host}:{server.server_port}', flush=True)
     if not public:
         print(f'Local discovery admin token: {admin_token}', flush=True)
     try:
