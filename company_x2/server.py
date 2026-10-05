@@ -1,7 +1,9 @@
-"""Loopback-only sandbox HTTP application with a durable, single worker."""
+"""Password-protected sandbox HTTP application. No payments or outreach."""
 import argparse
+import base64
 import json
 import logging
+import os
 import secrets
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -10,13 +12,14 @@ from urllib.parse import urlparse
 
 from .csv_service import MAX_BYTES
 from .discovery import qualify
-from .store import Store
+from .settings import build_store
+from .supabase_store import StorageUnavailable
 from .worker import process_one
 
 WEB = Path(__file__).parent / 'web.html'
 
 
-def handler_for(store, admin_token):
+def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
             # Do not log URLs, authorization or customer data.
@@ -38,26 +41,59 @@ def handler_for(store, admin_token):
 
         def allowed_host(self):
             # Prevent DNS rebinding and cross-origin writes to the local service.
-            expected = {f'127.0.0.1:{self.server.server_port}', f'localhost:{self.server.server_port}'}
+            expected = {f'127.0.0.1:{self.server.server_port}', f'localhost:{self.server.server_port}', *allowed_hosts}
             host = self.headers.get('Host', '')
             origin = self.headers.get('Origin')
-            return host in expected and (not origin or origin in {f'http://{h}' for h in expected})
+            return host in expected and (not origin or origin in {f'{scheme}://{h}' for h in expected for scheme in ('http','https')})
+
+        def access_allowed(self):
+            if not access_password:
+                return True
+            auth = self.headers.get('Authorization', '')
+            try:
+                decoded = base64.b64decode(auth[6:], validate=True).decode() if auth.startswith('Basic ') else ''
+                password = decoded.split(':', 1)[1] if ':' in decoded else ''
+            except (ValueError, UnicodeError):
+                password = ''
+            if secrets.compare_digest(password.encode(), access_password.encode()):
+                return True
+            self.send_response(401)
+            self.send_header('WWW-Authenticate', 'Basic realm="Company X2 Trial"')
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return False
 
         def token(self):
+            if self.headers.get('X-Order-Token'):
+                return self.headers['X-Order-Token']
             auth = self.headers.get('Authorization', '')
             return auth[7:] if auth.startswith('Bearer ') else ''
 
         def do_GET(self):
+            try:
+                self.get_response()
+            except StorageUnavailable:
+                self.respond(503, {'error': 'Storage unavailable; retry later'})
+            except Exception:
+                logging.exception('GET failed')
+                self.respond(500, {'error': 'Internal error'})
+
+        def get_response(self):
             if not self.allowed_host():
                 return self.respond(403, {'error': 'Host or origin rejected'})
             path = urlparse(self.path).path
+            if path == '/api/health':
+                if not store.ping():
+                    return self.respond(503, {'status': 'storage_unavailable'})
+                return self.respond(200, {'status': 'ok', 'endpoint': 'E02', 'mode': 'sandbox',
+                    'storage': 'supabase' if hasattr(store, 'rpc') else 'sqlite',
+                    'payments_enabled': False, 'outreach_enabled': False, 'ai_connected': False})
+            if not self.access_allowed():
+                return
             if path == '/':
                 return self.respond(200, WEB.read_bytes(), 'text/html; charset=utf-8')
-            if path == '/api/health':
-                return self.respond(200, {'status': 'ok', 'mode': 'sandbox', 'payments_enabled': False,
-                                          'outreach_enabled': False, 'ai_connected': False})
             if path == '/api/opportunities':
-                if not secrets.compare_digest(self.token(), admin_token):
+                if not secrets.compare_digest(self.headers.get('X-Admin-Token', self.token()), admin_token):
                     return self.respond(401, {'error': 'Admin token required'})
                 return self.respond(200, {'items': store.opportunities()})
             parts = path.strip('/').split('/')
@@ -78,6 +114,8 @@ def handler_for(store, admin_token):
             self.connection.settimeout(10)
             if not self.allowed_host():
                 return self.respond(403, {'error': 'Host or origin rejected'})
+            if not self.access_allowed():
+                return
             try:
                 size = int(self.headers.get('Content-Length', '0'))
                 if not 0 < size <= MAX_BYTES * 6 + 4096:
@@ -97,12 +135,14 @@ def handler_for(store, admin_token):
                     order_id = store.submit(text, key, token)
                     return self.respond(202, {'id': order_id, 'mode': 'sandbox', 'revenue_jpy': 0})
                 if path == '/api/opportunities':
-                    if not secrets.compare_digest(self.token(), admin_token):
+                    if not secrets.compare_digest(self.headers.get('X-Admin-Token', self.token()), admin_token):
                         return self.respond(401, {'error': 'Admin token required'})
                     decision, reason = qualify(data)
                     store.save_opportunity(data, decision, reason)
                     return self.respond(200, {'decision': decision, 'reason': reason, 'proposal_sent': False})
                 return self.respond(404, {'error': 'Not found'})
+            except StorageUnavailable:
+                return self.respond(503, {'error': 'Storage unavailable; retry with the same request key'})
             except (ValueError, UnicodeError, TimeoutError) as exc:
                 return self.respond(400, {'error': str(exc)[:200]})
             except Exception:
@@ -113,28 +153,40 @@ def handler_for(store, admin_token):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--port', type=int, default=8080)
+    parser.add_argument('--port', type=int, default=int(os.environ.get('PORT', '8080')))
+    parser.add_argument('--host', default='0.0.0.0' if os.environ.get('RENDER') else '127.0.0.1')
     parser.add_argument('--db', default='work/company-x2.db')
     args = parser.parse_args()
-    store = Store(args.db)
-    admin_token = secrets.token_urlsafe(32)
+    public = args.host not in ('127.0.0.1', 'localhost')
+    password = os.environ.get('APP_ACCESS_TOKEN')
+    admin_token = os.environ.get('ADMIN_TOKEN') or secrets.token_urlsafe(32)
+    hosts = [v.strip() for v in os.environ.get('ALLOWED_HOSTS', '').split(',') if v.strip()]
+    if os.environ.get('RENDER_EXTERNAL_HOSTNAME'):
+        hosts.append(os.environ['RENDER_EXTERNAL_HOSTNAME'])
+    if public and (not password or len(password) < 32 or not hosts):
+        raise ValueError('Public trial requires APP_ACCESS_TOKEN (32+ chars) and ALLOWED_HOSTS or RENDER_EXTERNAL_HOSTNAME')
+    store = build_store(local_path=args.db)
+    if not store.ping():
+        raise ValueError('Storage schema check failed')
     stop = threading.Event()
     # Bind before recovery, so a second instance cannot reset an active worker on this port.
-    server = ThreadingHTTPServer(('127.0.0.1', args.port), handler_for(store, admin_token))
+    server = ThreadingHTTPServer((args.host, args.port), handler_for(store, admin_token,
+        allowed_hosts=hosts, access_password=password if public else None))
     server.daemon_threads = True
     store.recover()
     def worker():
         while not stop.is_set():
             try:
                 if not process_one(store):
-                    stop.wait(0.25)
+                    stop.wait(2 if hasattr(store, 'rpc') else 0.25)
             except Exception:
-                logging.exception('Worker error')
-                stop.wait(1)
+                logging.error('Worker unavailable; retrying without logging request data')
+                stop.wait(5)
     thread = threading.Thread(target=worker, daemon=True)
     thread.start()
-    print(f'Company X2 sandbox: http://127.0.0.1:{server.server_port}', flush=True)
-    print(f'Local discovery admin token: {admin_token}', flush=True)
+    print(f'Company X2 E02 sandbox listening on {args.host}:{server.server_port}', flush=True)
+    if not public:
+        print(f'Local discovery admin token: {admin_token}', flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

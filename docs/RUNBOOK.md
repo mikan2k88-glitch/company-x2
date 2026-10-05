@@ -40,7 +40,7 @@ python -m company_x2.scout listings.json
 この例は形式説明用で、実在案件ではありません。sourceとexternal_idで重複を抑制します。
 取得元の真正性・期限・自動応募条件はまだ検証できません。qualifiedは受注済みを意味しません。
 自動提案の許可がない候補はblockedになります。どの候補にも営業送信しません。
-ローカル管理APIは起動時に表示する管理トークンをBearer認証に使用します。
+ローカル管理APIは起動時に表示する管理トークンをX-Admin-Tokenヘッダーに使用します。
 GET /api/opportunities で一覧、POST /api/opportunities で1件の取り込みができます。
 
 ## 運用範囲
@@ -48,10 +48,10 @@ GET /api/opportunities で一覧、POST /api/opportunities で1件の取り込�
 - 127.0.0.1専用。公開用のサーバーではありません。
 - 同じDBに対して起動するプロセスは1つのみ。別ポートで同じDBを使わないでください。
 - 制作は外部副作用のないCSV処理。起動時に中断案件を再キューします。
-- 実決済・営業送信・AI・Supabase接続は未実装です。売上は常に0円です。
+- 実決済・営業送信・AIは未実装です。売上は常に0円です。
 - 本番前に認証、アップロード制限、保持期限、処理数制限、HTTPS、永続化アダプターを追加します。
 - CSVの値は保持されるため、表計算ソフトへの数式注入を防ぐ出力仕様を本番前に確定します。
-- Supabase DDLは未適用。SQLiteとSupabaseの同期もありません。
+- Supabase保存アダプターはE02で実装。設定はdocs/RENDER.md参照。SQLiteとの同期はありません。
 
 ## 次の実装
 

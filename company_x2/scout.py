@@ -3,7 +3,7 @@ import argparse
 import json
 from pathlib import Path
 from .discovery import qualify
-from .store import Store
+from .settings import build_store
 
 
 def import_feed(store, items):
@@ -25,7 +25,7 @@ def main():
     path = Path(args.feed)
     if path.stat().st_size > 1_000_000:
         raise ValueError('Feed too large')
-    print(json.dumps(import_feed(Store(args.db), json.loads(path.read_text(encoding='utf-8-sig'))),
+    print(json.dumps(import_feed(build_store(local_path=args.db), json.loads(path.read_text(encoding='utf-8-sig'))),
                      ensure_ascii=False, indent=2))
 
 
