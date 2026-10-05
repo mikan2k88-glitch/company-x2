@@ -48,3 +48,4 @@ def advance(job: Job, target: State, *, evidence: dict) -> Job:
         if evidence.get("supported_service") is not True:
             raise ValueError("unsupported service")
     return replace(job, state=target)
+

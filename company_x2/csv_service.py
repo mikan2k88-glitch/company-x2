@@ -29,3 +29,4 @@ def deduplicate_csv(text: str) -> dict:
     writer.writerows(unique)
     return {"csv": output.getvalue(), "input_rows": count,
             "output_rows": len(unique), "removed_rows": count - len(unique)}
+

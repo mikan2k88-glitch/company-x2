@@ -33,3 +33,4 @@ alter table company_x2.jobs enable row level security;
 alter table company_x2.events enable row level security;
 alter table company_x2.artifacts enable row level security;
 -- No public policies. Server persistence adapter and transactional RPC are pending.
+
