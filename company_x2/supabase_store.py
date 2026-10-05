@@ -10,6 +10,12 @@ class StorageUnavailable(RuntimeError):
     pass
 
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        # Never forward server secrets to a redirect target.
+        raise urllib.error.URLError('Supabase redirect rejected')
+
+
 class SupabaseStore:
     digest = staticmethod(Store.digest)
 
@@ -21,7 +27,7 @@ class SupabaseStore:
             raise ValueError('Server secret or legacy service-role key required')
         self.url = url.rstrip('/') + '/rest/v1/rpc/cx2_store'
         self.key = key
-        self.opener = opener or urllib.request.urlopen
+        self.opener = opener or urllib.request.build_opener(NoRedirect()).open
 
     def rpc(self, action, payload=None):
         headers = {'Content-Type': 'application/json', 'apikey': self.key}
@@ -67,3 +73,4 @@ class SupabaseStore:
 
     def opportunities(self):
         return self.rpc('opportunities')
+
