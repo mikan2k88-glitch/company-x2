@@ -75,7 +75,7 @@ class Store:
             db.execute('insert into events(order_id,kind) values(?,?)', (row['id'], 'processing_started'))
             return dict(row)
 
-    def finish(self, order_id, *, result=None, error=None):
+    def finish(self, order_id, *, result=None, error=None, lease=None):
         status = 'failed' if error else 'ready'
         with self.connect() as db:
             db.execute('begin immediate')
@@ -90,6 +90,10 @@ class Store:
         with self.connect() as db:
             db.execute("insert into events(order_id,kind) select id,'restart_requeued' from orders where status='processing'")
             db.execute("update orders set status='queued' where status='processing'")
+
+    def ping(self):
+        with self.connect() as db:
+            return db.execute('select 1').fetchone()[0] == 1
 
     def get(self, order_id, token):
         with self.connect() as db:
