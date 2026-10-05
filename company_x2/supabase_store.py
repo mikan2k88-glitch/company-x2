@@ -29,11 +29,14 @@ class SupabaseStore:
         self.key = key
         self.opener = opener or urllib.request.build_opener(NoRedirect()).open
 
-    def rpc(self, action, payload=None):
+    def rpc(self, action, payload=None, *, endpoint='cx2_store'):
+        if endpoint not in ('cx2_store', 'cx2_scout'):
+            raise ValueError('Unknown RPC endpoint')
         headers = {'Content-Type': 'application/json', 'apikey': self.key}
         if not self.key.startswith('sb_secret_'):
             headers['Authorization'] = 'Bearer ' + self.key
-        req = urllib.request.Request(self.url, data=json.dumps({'p_action': action, 'p_payload': payload or {}}).encode(),
+        url = self.url.rsplit('/', 1)[0] + '/' + endpoint
+        req = urllib.request.Request(url, data=json.dumps({'p_action': action, 'p_payload': payload or {}}).encode(),
                                      headers=headers, method='POST')
         try:
             with self.opener(req, timeout=15) as response:
@@ -81,3 +84,12 @@ class SupabaseStore:
     def opportunities(self):
         return self.rpc('opportunities')
 
+    def claim_scan(self):
+        return self.rpc('claim', endpoint='cx2_scout')
+
+    def finish_scan(self, lease, *, items=None, report=None, error=None, delay=3600):
+        return self.rpc('finish', {'lease': lease, 'items': items, 'report': report,
+                                  'error': error, 'delay': delay}, endpoint='cx2_scout')
+
+    def scan_snapshot(self):
+        return self.rpc('snapshot', endpoint='cx2_scout')
