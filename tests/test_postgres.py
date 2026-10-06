@@ -13,8 +13,11 @@ DSN = os.environ.get('CX2_TEST_DSN')
 class PostgresTests(unittest.TestCase):
     @classmethod
     def sql(cls, query, *, check=True):
-        return subprocess.run(['psql', DSN, '-X', '-A', '-t', '-v', 'ON_ERROR_STOP=1', '-c', query],
-            capture_output=True, text=True, check=check)
+        result = subprocess.run(['psql', DSN, '-X', '-A', '-t', '-v', 'ON_ERROR_STOP=1', '-c', query],
+            capture_output=True, text=True, check=False)
+        if check and result.returncode:
+            raise subprocess.CalledProcessError(result.returncode, 'psql', output=result.stdout, stderr=result.stderr)
+        return result
 
     @classmethod
     def setUpClass(cls):
@@ -23,8 +26,11 @@ class PostgresTests(unittest.TestCase):
         cls.sql(migration)
         cls.sql(Path('supabase/migrations/003_public_scout.sql').read_text())
         cls.sql(Path('supabase/migrations/004_data_services.sql').read_text())
+        cls.sql(Path('supabase/migrations/009_company.sql').read_text())
+        cls.sql(Path('supabase/migrations/009_company.sql').read_text())
 
     def setUp(self):
+        self.sql('truncate company_x2.company_payment_events,company_x2.company_events,company_x2.company_orders,company_x2.company_ai_calls cascade;')
         self.sql('truncate company_x2.sandbox_events,company_x2.sandbox_orders cascade;')
         self.sql('truncate company_x2.service_events,company_x2.service_orders cascade;')
         self.sql("delete from company_x2.sandbox_opportunities; delete from company_x2.scout_state; insert into company_x2.scout_state(id) values(1);")
@@ -40,6 +46,76 @@ class PostgresTests(unittest.TestCase):
 
     def test_rpc_lifecycle_and_idempotency(self):
         self.assertEqual(self.rpc('ping'), {'schema_version':2})
+
+    def company_rpc(self, action, payload=None):
+        data=json.dumps(payload or {}).replace("'","''")
+        response=self.sql(f"set role service_role; select coalesce(public.cx2_company('{action}','{data}'::jsonb),'null'::jsonb);")
+        return json.loads(response.stdout.splitlines()[-1])
+
+    def company_create(self, mode='sandbox', key='company-request-key'):
+        from company_x2.company import quote,validate_creation
+        plan=quote('csv_to_json','id\n001\n',mode)
+        payload=validate_creation({'csv':'id\n001\n','service_key':'csv_to_json','payment_mode':mode,
+            'terms_accepted':True,'request_key':key,'plan_sha256':plan['plan_sha256']},'t'*32)
+        return self.company_rpc('create',payload),payload
+
+    def test_company_real_sql_adapter_production_receipt_and_permissions(self):
+        import io
+        from company_x2.company import process_transaction
+        from company_x2.supabase_store import SupabaseStore
+        def opener(req,timeout):
+            payload=json.loads(req.data)
+            result=self.company_rpc(payload['p_action'],payload['p_payload'])
+            return io.BytesIO(json.dumps(result).encode())
+        store=SupabaseStore('https://example.supabase.co','sb_secret_fixture',opener=opener)
+        self.assertEqual(store.company_rpc('ping'),{'schema_version':9})
+        order,payload=self.company_create()
+        self.assertEqual(self.company_rpc('create',payload),order)
+        self.assertTrue(process_transaction(store));self.assertFalse(process_transaction(store))
+        saved=store.company_rpc('get',{'id':order,'token_hash':store.digest('t'*32)})
+        self.assertEqual(saved['status'],'ready')
+        self.assertEqual(json.loads(saved['result']['artifact']['content']),[{'id':'001'}])
+        self.assertIsNone(store.company_rpc('get',{'id':order,'token_hash':'a'*64}))
+        store.company_rpc('receipt',{'id':order,'token_hash':store.digest('t'*32),'download_sha256':saved['result']['download_sha256']})
+        self.assertEqual(store.company_rpc('get',{'id':order,'token_hash':store.digest('t'*32)})['status'],'delivered')
+        self.assertEqual(store.company_rpc('overview')['real_revenue_jpy'],0)
+        for role in ('anon','authenticated'):
+            self.assertNotEqual(self.sql(f"set role {role}; select public.cx2_company('overview');",check=False).returncode,0)
+            self.assertNotEqual(self.sql(f"set role {role}; select * from company_x2.company_orders;",check=False).returncode,0)
+
+    def test_company_payment_mismatch_replay_and_unpaid_queue(self):
+        order,payload=self.company_create('stripe_test')
+        self.assertIsNone(self.company_rpc('claim'))
+        self.company_rpc('session',{'id':order,'token_hash':payload['token_hash'],
+            'session_id':'cs_test_fixture','session_url':'https://checkout.stripe.com/c/pay/test'})
+        evidence={'id':order,'session_id':'cs_test_fixture','event_id':'evt_fixture','fingerprint':'a'*64,
+                  'amount':100,'currency':'jpy','livemode':False,'payment_status':'paid'}
+        for change in ({'amount':1},{'livemode':True},{'currency':'usd'},{'session_id':None}):
+            with self.assertRaises(subprocess.CalledProcessError):self.company_rpc('payment',{**evidence,**change})
+        self.company_rpc('payment',evidence);self.company_rpc('payment',evidence)
+        with self.assertRaises(subprocess.CalledProcessError):self.company_rpc('payment',{**evidence,'fingerprint':'b'*64})
+        self.assertEqual(self.company_rpc('claim')['id'],order)
+        self.assertIsNone(self.company_rpc('claim'))
+        self.assertEqual(self.company_rpc('overview')['test_payments_jpy'],100)
+        self.assertEqual(self.company_rpc('overview')['real_revenue_jpy'],0)
+
+    def test_company_budget_concurrency_and_restart(self):
+        from concurrent.futures import ThreadPoolExecutor
+        payload={'request_hash':'a'*64,'month':'2026-10','day':'2026-10-06','reserve':100,'month_limit':100,'day_limit':100}
+        with ThreadPoolExecutor(2) as pool:
+            answers=list(pool.map(lambda _:self.company_rpc('ai_reserve',payload),range(2)))
+        self.assertEqual(sum(a['reserved'] for a in answers),1)
+        with self.assertRaises(subprocess.CalledProcessError):self.company_rpc('ai_reserve',{**payload,'request_hash':'b'*64})
+        self.company_rpc('ai_finish',{'request_hash':'a'*64,'result':{'supported':False}})
+        self.assertEqual(self.company_rpc('ai_reserve',payload)['result'],{'supported':False})
+        order,_=self.company_create()
+        first=self.company_rpc('claim')
+        self.sql(f"update company_x2.company_orders set lease_until=now()-interval '1 second' where id='{order}';")
+        second=self.company_rpc('claim')
+        self.assertNotEqual(first['lease'],second['lease'])
+        with self.assertRaises(subprocess.CalledProcessError):self.company_rpc('finish',{'id':order,'lease':first['lease'],'error':'late'})
+        self.sql(f"update company_x2.company_orders set lease_until=now()-interval '1 second',attempts=3 where id='{order}';")
+        self.assertIsNone(self.company_rpc('claim'))
         order = self.submit()
         self.assertEqual(order, self.submit())
         claim = self.rpc('claim')

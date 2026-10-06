@@ -110,7 +110,7 @@ class CloudTests(unittest.TestCase):
             headers = {'Host': 'company-x2.onrender.com'}
             try:
                 with urllib.request.urlopen(urllib.request.Request(base+'/api/health',headers=headers)) as response:
-                    self.assertEqual(json.load(response)['endpoint'], 'E05')
+                    self.assertEqual(json.load(response)['endpoint'], 'E09')
                 with self.assertRaises(urllib.error.HTTPError) as unauthorized:
                     urllib.request.urlopen(urllib.request.Request(base+'/',headers=headers))
                 self.assertEqual(unauthorized.exception.code, 401)
