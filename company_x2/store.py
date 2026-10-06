@@ -42,6 +42,12 @@ class Store:
             ''')
             if 'service_key' not in {r['name'] for r in db.execute('pragma table_info(orders)')}:
                 db.execute("alter table orders add column service_key text not null default 'csv_exact_dedup'")
+        from .company_store import initialize
+        initialize(self)
+
+    def company_rpc(self, action, payload=None):
+        from .company_store import rpc
+        return rpc(self, action, payload or {})
 
     @contextmanager
     def connect(self):

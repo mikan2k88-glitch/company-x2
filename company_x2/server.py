@@ -1,4 +1,4 @@
-"""Password-protected sandbox HTTP application. No payments or outreach."""
+"""Password-protected sandbox with optional AI and Stripe test reconciliation."""
 import argparse
 import base64
 import json
@@ -18,11 +18,16 @@ from .worker import process_one
 from .public_scout import scan_once, snapshot
 from .data_services import SERVICES, require_service
 from .planner import REQUESTS, plan_request
+from .ai_planner import AIPlanner
+from .payments import Payments
+from .company import process_transaction
+from .company_http import get_route as company_get, post_route as company_post
 
 WEB = Path(__file__).parent / 'web.html'
 
 
-def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, scout_enabled=True):
+def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, scout_enabled=True, ai=None, payments=None):
+    ai, payments = ai or AIPlanner(), payments or Payments()
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
             # Do not log URLs, authorization or customer data.
@@ -90,13 +95,17 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
             if path == '/api/health':
                 if not store.ping():
                     return self.respond(503, {'status': 'storage_unavailable'})
-                return self.respond(200, {'status': 'ok', 'endpoint': 'E05', 'mode': 'sandbox',
+                return self.respond(200, {'status': 'ok', 'endpoint': 'E09', 'mode': 'sandbox',
                     'storage': 'supabase' if hasattr(store, 'rpc') else 'sqlite',
                     'payments_enabled': False, 'outreach_enabled': False, 'ai_connected': False})
             if not self.access_allowed():
                 return
             if path == '/':
                 return self.respond(200, WEB.read_bytes(), 'text/html; charset=utf-8')
+            if path == '/company':
+                return self.respond(200, (WEB.parent / 'company.html').read_bytes(), 'text/html; charset=utf-8')
+            if company_get(self,path,store,ai,payments,scout_enabled):
+                return
             if path == '/api/scout':
                 return self.respond(200, snapshot(store, enabled=scout_enabled))
             if path == '/api/plans':
@@ -143,6 +152,22 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
             self.connection.settimeout(10)
             if not self.allowed_host():
                 return self.respond(403, {'error': 'Host or origin rejected'})
+            path = urlparse(self.path).path
+            if path == '/api/payments/webhook':
+                try:
+                    size = int(self.headers.get('Content-Length','0'))
+                    if not 0 < size <= 200_000:
+                        return self.respond(413,{'error':'Webhook size rejected'})
+                    raw = self.rfile.read(size)
+                    event = payments.signed_event(raw,self.headers.get('Stripe-Signature',''))
+                    return self.respond(200,payments.apply_event(store,event))
+                except StorageUnavailable:
+                    return self.respond(503,{'error':'Storage unavailable; retry event'})
+                except (ValueError,TypeError,TimeoutError):
+                    return self.respond(400,{'error':'Webhook evidence rejected'})
+                except Exception:
+                    logging.error('Webhook processing unavailable')
+                    return self.respond(500,{'error':'Webhook processing unavailable; retry event'})
             if not self.access_allowed():
                 return
             try:
@@ -155,6 +180,8 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
                 if not isinstance(data, dict):
                     raise ValueError('Object required')
                 path = urlparse(self.path).path
+                if company_post(self,path,data,store,ai,payments):
+                    return
                 if path in ('/api/plans', '/api/plans/run'):
                     plan = plan_request(data.get('request'), data.get('csv'))
                     if plan['service_key'] != 'csv_exact_dedup' and not store.services_ready():
@@ -220,8 +247,9 @@ def main():
         raise ValueError('Storage schema check failed')
     stop = threading.Event()
     # Bind before recovery, so a second instance cannot reset an active worker on this port.
+    ai, payments = AIPlanner(), Payments()
     server = ThreadingHTTPServer((args.host, args.port), handler_for(store, admin_token,
-        allowed_hosts=hosts, access_password=password if public else None, scout_enabled=scout_enabled))
+        allowed_hosts=hosts, access_password=password if public else None, scout_enabled=scout_enabled,ai=ai,payments=payments))
     server.daemon_threads = True
     store.recover()
     def worker():
@@ -234,6 +262,32 @@ def main():
                 stop.wait(5)
     thread = threading.Thread(target=worker, daemon=True)
     thread.start()
+    def company_worker():
+        while not stop.is_set():
+            try:
+                if not process_transaction(store):
+                    stop.wait(2)
+            except Exception:
+                logging.warning('Company queue unavailable; legacy orders continue')
+                stop.wait(60)
+    company_thread = threading.Thread(target=company_worker,daemon=True)
+    company_thread.start()
+    def payment_worker():
+        while not stop.is_set():
+            if payments.status()['ready']:
+                try:
+                    for order in store.company_rpc('pending_payments'):
+                        if stop.is_set():
+                            break
+                        try:
+                            payments.reconcile(store,order)
+                        except Exception:
+                            logging.warning('Test payment reconciliation deferred')
+                except Exception:
+                    logging.warning('Test payment queue unavailable')
+            stop.wait(30)
+    payment_thread = threading.Thread(target=payment_worker,daemon=True)
+    payment_thread.start()
     def scout_worker():
         while not stop.is_set():
             try:
@@ -246,7 +300,7 @@ def main():
     scout_thread = threading.Thread(target=scout_worker, daemon=True) if scout_enabled else None
     if scout_thread:
         scout_thread.start()
-    print(f'Company X2 E05 sandbox listening on {args.host}:{server.server_port}', flush=True)
+    print(f'Company X2 E09 sandbox listening on {args.host}:{server.server_port}', flush=True)
     if not public:
         print(f'Local discovery admin token: {admin_token}', flush=True)
     try:
@@ -257,6 +311,8 @@ def main():
         stop.set()
         server.server_close()
         thread.join(timeout=5)
+        company_thread.join(timeout=5)
+        payment_thread.join(timeout=5)
 
 
 if __name__ == '__main__':
