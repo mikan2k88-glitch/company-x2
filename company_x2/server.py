@@ -17,6 +17,7 @@ from .supabase_store import StorageUnavailable
 from .worker import process_one
 from .public_scout import scan_once, snapshot
 from .data_services import SERVICES, require_service
+from .planner import REQUESTS, plan_request
 
 WEB = Path(__file__).parent / 'web.html'
 
@@ -89,7 +90,7 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
             if path == '/api/health':
                 if not store.ping():
                     return self.respond(503, {'status': 'storage_unavailable'})
-                return self.respond(200, {'status': 'ok', 'endpoint': 'E04', 'mode': 'sandbox',
+                return self.respond(200, {'status': 'ok', 'endpoint': 'E05', 'mode': 'sandbox',
                     'storage': 'supabase' if hasattr(store, 'rpc') else 'sqlite',
                     'payments_enabled': False, 'outreach_enabled': False, 'ai_connected': False})
             if not self.access_allowed():
@@ -98,6 +99,9 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
                 return self.respond(200, WEB.read_bytes(), 'text/html; charset=utf-8')
             if path == '/api/scout':
                 return self.respond(200, snapshot(store, enabled=scout_enabled))
+            if path == '/api/plans':
+                return self.respond(200, {'examples': [{'service_key': key, 'request': values[0]}
+                    for key, values in REQUESTS.items()], 'planner': 'deterministic', 'ai_connected': False})
             if path == '/api/services':
                 try:
                     ready = store.services_ready()
@@ -151,6 +155,25 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
                 if not isinstance(data, dict):
                     raise ValueError('Object required')
                 path = urlparse(self.path).path
+                if path in ('/api/plans', '/api/plans/run'):
+                    plan = plan_request(data.get('request'), data.get('csv'))
+                    if plan['service_key'] != 'csv_exact_dedup' and not store.services_ready():
+                        raise ValueError('004_data_services.sqlの適用と接続設定を確認してください')
+                    if path == '/api/plans':
+                        return self.respond(200, {'plan': plan, 'submitted': False})
+                    if data.get('terms_accepted') is not True:
+                        raise ValueError('作業計画と無料検証条件への同意が必要です')
+                    digest = data.get('plan_sha256')
+                    if (not isinstance(digest, str) or len(digest) != 64
+                            or any(c not in '0123456789abcdef' for c in digest)
+                            or not secrets.compare_digest(digest, plan['plan_sha256'])):
+                        raise ValueError('依頼か入力が変更されました。作業計画を作り直してください')
+                    key = data.get('request_key')
+                    if not isinstance(key, str):
+                        raise ValueError('Request key required')
+                    order_id = store.submit(data['csv'], key, self.token(), plan['service_key'])
+                    return self.respond(202, {'id': order_id, 'service_key': plan['service_key'],
+                        'plan_sha256': plan['plan_sha256'], 'mode': 'sandbox', 'revenue_jpy': 0})
                 if path == '/api/orders':
                     if data.get('terms_accepted') is not True:
                         raise ValueError('Sandbox service terms must be accepted')
@@ -223,7 +246,7 @@ def main():
     scout_thread = threading.Thread(target=scout_worker, daemon=True) if scout_enabled else None
     if scout_thread:
         scout_thread.start()
-    print(f'Company X2 E04 sandbox listening on {args.host}:{server.server_port}', flush=True)
+    print(f'Company X2 E05 sandbox listening on {args.host}:{server.server_port}', flush=True)
     if not public:
         print(f'Local discovery admin token: {admin_token}', flush=True)
     try:
