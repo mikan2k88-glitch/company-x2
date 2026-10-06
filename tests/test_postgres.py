@@ -13,8 +13,11 @@ DSN = os.environ.get('CX2_TEST_DSN')
 class PostgresTests(unittest.TestCase):
     @classmethod
     def sql(cls, query, *, check=True):
-        return subprocess.run(['psql', DSN, '-X', '-A', '-t', '-v', 'ON_ERROR_STOP=1', '-c', query],
-            capture_output=True, text=True, check=check)
+        result = subprocess.run(['psql', DSN, '-X', '-A', '-t', '-v', 'ON_ERROR_STOP=1', '-c', query],
+            capture_output=True, text=True, check=False)
+        if check and result.returncode:
+            raise subprocess.CalledProcessError(result.returncode, 'psql', output=result.stdout, stderr=result.stderr)
+        return result
 
     @classmethod
     def setUpClass(cls):

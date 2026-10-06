@@ -45,7 +45,7 @@ begin
    or coalesce(p_payload->'plan'->>'service_key','') not in ('csv_exact_dedup','csv_trim','csv_to_json','csv_audit')
    or coalesce(p_payload->'plan'->>'currency','')<>'jpy'
    or coalesce(p_payload->'plan'->>'terms_version','')<>'e09-v1'
-   or coalesce(p_payload->'plan'->>'price_jpy','') <> case when p_payload->'plan'->>'payment_mode'='stripe_test' then '100' else '0' end
+   or coalesce(p_payload->'plan'->>'price_jpy','') <> (case when p_payload->'plan'->>'payment_mode'='stripe_test' then '100' else '0' end)
    then raise exception 'Invalid company order' using errcode='22023'; end if;
   perform pg_advisory_xact_lock(20261006,9);
   select * into r from company_x2.company_orders where request_key=p_payload->>'request_key';
@@ -172,7 +172,7 @@ begin
   ) select coalesce(jsonb_agg(to_jsonb(claimed)),'[]'::jsonb) into v from claimed;
   return v;
  elsif p_action='overview' then
-  select coalesce(jsonb_object_agg(status,n),'{}'::jsonb) into v from (select status,count(*) as n from company_x2.company_orders group by status) s;
+  select coalesce(jsonb_object_agg(s.status,s.n),'{}'::jsonb) into v from (select status,count(*) as n from company_x2.company_orders group by status) s;
   return jsonb_build_object('counts',v,'real_revenue_jpy',0,
    'test_payments_jpy',(select coalesce(sum((plan->>'price_jpy')::integer),0) from company_x2.company_orders where payment_status='paid'),
    'ai_reserved_micro_usd',(select coalesce(sum(reserve),0) from company_x2.company_ai_calls),
