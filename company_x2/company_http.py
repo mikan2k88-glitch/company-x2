@@ -5,14 +5,17 @@ from .data_services import make_artifact, SERVICES
 from .payments import Payments
 from .public_scout import snapshot
 from .acquisition import organize, draft
+from .agent_scout import state as agent_state, register as agent_register
 
 
 def get_route(handler, path, store, ai, payments, scout_enabled):
-    if path == '/api/company/status':
+    if path == '/api/company/agent-scout':
+        handler.respond(200,agent_state(store))
+    elif path == '/api/company/status':
         handler.respond(200, company_status(store,ai,payments))
     elif path == '/api/company/candidates':
         data = snapshot(store,enabled=scout_enabled)
-        data.update(organize(data.get('items',[])))
+        data.update(organize((agent_state(store).get('items',[])+data.get('items',[]))[:30]))
         handler.respond(200,data)
     elif path == '/api/intake/config':
         ready = company_status(store,ai,payments)
@@ -45,8 +48,10 @@ def get_route(handler, path, store, ai, payments, scout_enabled):
 
 
 def post_route(handler, path, data, store, ai, payments):
-    if path == '/api/company/lead-draft':
-        handler.respond(200,draft(snapshot(store).get('items',[]),data.get('source_url')))
+    if path == '/api/company/agent-scout':
+        handler.respond(200,agent_register(store,data))
+    elif path == '/api/company/lead-draft':
+        handler.respond(200,draft((agent_state(store).get('items',[])+snapshot(store).get('items',[]))[:30],data.get('source_url')))
     elif path == '/api/company/ai':
         if data.get('ai_terms_accepted') is not True:
             raise ValueError('依頼文を設定済みのAI提供元へ送信することへの同意が必要です')
