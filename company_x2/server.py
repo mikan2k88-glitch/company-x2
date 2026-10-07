@@ -26,7 +26,7 @@ from .company_http import get_route as company_get, post_route as company_post
 WEB = Path(__file__).parent / 'web.html'
 
 
-def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, scout_enabled=True, ai=None, payments=None):
+def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, scout_enabled=True, ai=None, payments=None, agent_token=None):
     ai, payments = ai or AIPlanner(), payments or Payments()
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
@@ -57,6 +57,10 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
             return host in expected and (not origin or origin in {f'{scheme}://{h}' for h in expected for scheme in ('http','https')})
 
         def access_allowed(self):
+            if urlparse(self.path).path == '/api/company/agent-scout' and agent_token and len(agent_token)>=32:
+                auth=self.headers.get('Authorization','')
+                if auth.startswith('Bearer ') and secrets.compare_digest(auth[7:].encode(),agent_token.encode()):
+                    return True
             if not access_password:
                 return True
             auth = self.headers.get('Authorization', '')
@@ -95,7 +99,7 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
             if path == '/api/health':
                 if not store.ping():
                     return self.respond(503, {'status': 'storage_unavailable'})
-                return self.respond(200, {'status': 'ok', 'endpoint': 'E11', 'mode': 'sandbox',
+                return self.respond(200, {'status': 'ok', 'endpoint': 'E12', 'mode': 'sandbox',
                     'storage': 'supabase' if hasattr(store, 'rpc') else 'sqlite',
                     'payments_enabled': False, 'outreach_enabled': False, 'ai_connected': False})
             if not self.access_allowed():
@@ -251,7 +255,7 @@ def main():
     # Bind before recovery, so a second instance cannot reset an active worker on this port.
     ai, payments = AIPlanner(), Payments()
     server = ThreadingHTTPServer((args.host, args.port), handler_for(store, admin_token,
-        allowed_hosts=hosts, access_password=password if public else None, scout_enabled=scout_enabled,ai=ai,payments=payments))
+        allowed_hosts=hosts, access_password=password if public else None, scout_enabled=scout_enabled,ai=ai,payments=payments,agent_token=os.environ.get('AGENT_SCOUT_TOKEN')))
     server.daemon_threads = True
     store.recover()
     def worker():
