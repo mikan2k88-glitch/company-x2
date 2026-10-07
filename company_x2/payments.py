@@ -49,7 +49,9 @@ class Payments:
         except Exception:
             raise ValueError('Stripeの応答を確認できませんでした。同じ注文で再確認してください') from None
 
-    def checkout(self, store, order, token_hash):
+    def checkout(self, store, order, token_hash, return_path='/company'):
+        if return_path not in ('/company','/intake'):
+            raise ValueError('決済の戻り先を確認してください')
         if order['plan']['payment_mode'] != 'stripe_test':
             raise ValueError('無料注文に決済は不要です')
         if order.get('session_id'):
@@ -58,7 +60,7 @@ class Payments:
             raise ValueError('この注文は決済受付できません')
         result = self.api('checkout/sessions',{
             'mode':'payment','payment_method_types[0]':'card',
-            'success_url':self.base+'/?checkout=returned', 'cancel_url':self.base+'/?checkout=cancelled',
+            'success_url':self.base+return_path+'?checkout=returned', 'cancel_url':self.base+return_path+'?checkout=cancelled',
             'client_reference_id':order['id'],'metadata[cx2_order_id]':order['id'],
             'line_items[0][quantity]':1,'line_items[0][price_data][currency]':'jpy',
             'line_items[0][price_data][unit_amount]':order['plan']['price_jpy'],

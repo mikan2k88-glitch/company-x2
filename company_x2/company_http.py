@@ -4,6 +4,7 @@ from .company import company_status, quote, rank_candidates, validate_creation
 from .data_services import make_artifact, SERVICES
 from .payments import Payments
 from .public_scout import snapshot
+from .acquisition import organize, draft
 
 
 def get_route(handler, path, store, ai, payments, scout_enabled):
@@ -11,8 +12,12 @@ def get_route(handler, path, store, ai, payments, scout_enabled):
         handler.respond(200, company_status(store,ai,payments))
     elif path == '/api/company/candidates':
         data = snapshot(store,enabled=scout_enabled)
-        data['items'] = rank_candidates(data.get('items',[]))
+        data.update(organize(data.get('items',[])))
         handler.respond(200,data)
+    elif path == '/api/intake/config':
+        ready = company_status(store,ai,payments)
+        handler.respond(200,{'database_ready':ready['database_ready'],
+            'database_error':ready['database_error'], 'payments_ready':ready['payments']['ready']})
     elif path.startswith('/api/company/transactions/'):
         parts = path.strip('/').split('/')
         if len(parts) not in (4,5) or (len(parts)==5 and parts[4]!='download'):
@@ -40,7 +45,9 @@ def get_route(handler, path, store, ai, payments, scout_enabled):
 
 
 def post_route(handler, path, data, store, ai, payments):
-    if path == '/api/company/ai':
+    if path == '/api/company/lead-draft':
+        handler.respond(200,draft(snapshot(store).get('items',[]),data.get('source_url')))
+    elif path == '/api/company/ai':
         if data.get('ai_terms_accepted') is not True:
             raise ValueError('依頼文を設定済みのAI提供元へ送信することへの同意が必要です')
         handler.respond(200,ai.analyze(store,data.get('request'),handler.token()))
@@ -58,7 +65,7 @@ def post_route(handler, path, data, store, ai, payments):
         if not order:
             handler.respond(404,{'error':'Transaction not found'})
         elif path.endswith('/checkout'):
-            handler.respond(200,payments.checkout(store,order,token_hash))
+            handler.respond(200,payments.checkout(store,order,token_hash,data.get('return_path','/company')))
         elif path.endswith('/reconcile'):
             handler.respond(200,payments.reconcile(store,order))
         else:

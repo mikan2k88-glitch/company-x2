@@ -95,7 +95,7 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
             if path == '/api/health':
                 if not store.ping():
                     return self.respond(503, {'status': 'storage_unavailable'})
-                return self.respond(200, {'status': 'ok', 'endpoint': 'E09', 'mode': 'sandbox',
+                return self.respond(200, {'status': 'ok', 'endpoint': 'E10', 'mode': 'sandbox',
                     'storage': 'supabase' if hasattr(store, 'rpc') else 'sqlite',
                     'payments_enabled': False, 'outreach_enabled': False, 'ai_connected': False})
             if not self.access_allowed():
@@ -104,6 +104,8 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
                 return self.respond(200, WEB.read_bytes(), 'text/html; charset=utf-8')
             if path == '/company':
                 return self.respond(200, (WEB.parent / 'company.html').read_bytes(), 'text/html; charset=utf-8')
+            if path == '/intake':
+                return self.respond(200, (WEB.parent / 'intake.html').read_bytes(), 'text/html; charset=utf-8')
             if company_get(self,path,store,ai,payments,scout_enabled):
                 return
             if path == '/api/scout':
