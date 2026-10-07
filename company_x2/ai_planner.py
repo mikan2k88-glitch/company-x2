@@ -23,6 +23,16 @@ SCHEMA = {'type':'object','properties':{
 
 
 class AIPlanner:
+    def __new__(cls, env=None, opener=None):
+        settings = os.environ if env is None else env
+        provider = settings.get('AI_PROVIDER', 'gemini' if settings.get('GEMINI_API_KEY') else 'openai')
+        if provider == 'gemini':
+            from .gemini_planner import GeminiPlanner
+            return GeminiPlanner(settings, opener)
+        if provider != 'openai':
+            raise ValueError('AI_PROVIDER must be gemini or openai')
+        return super().__new__(cls)
+
     def __init__(self, env=None, opener=None):
         env = os.environ if env is None else env
         self.key = env.get('OPENAI_API_KEY', '')
@@ -33,7 +43,7 @@ class AIPlanner:
 
     def status(self):
         ready = bool(self.enabled and self.key and self.month_limit > 0 and self.day_limit > 0)
-        return {'ready':ready,'model':MODEL,'monthly_budget_usd':self.month_limit/1_000_000,
+        return {'ready':ready,'provider':'openai','model':MODEL,'monthly_budget_usd':self.month_limit/1_000_000,
                 'daily_budget_usd':self.day_limit/1_000_000,
                 'csv_sent':False,'reason':None if ready else 'OPENAI_API_KEY、AI_ENABLED、日次と月次の予算設定が必要です'}
 
