@@ -15,15 +15,15 @@ def request(data=None,opener=None,token=None):
     if len(token)<32:raise ValueError('Scout authentication is not configured')
     req=urllib.request.Request(URL,data=None if data is None else json.dumps(data).encode(),
         headers={'Authorization':'Bearer '+token,'Content-Type':'application/json'},method='GET' if data is None else 'POST')
-    with (opener or urllib.request.build_opener(NoRedirect()).open)(req,timeout=100) as response:
+    with (opener or urllib.request.build_opener(NoRedirect()).open)(req,timeout=150) as response:
         raw=response.read(2_000_001)
     if len(raw)>2_000_000:raise ValueError('Scout response too large')
     return json.loads(raw)
 
 def main():
-    parser=argparse.ArgumentParser();parser.add_argument('--input',type=Path);args=parser.parse_args()
+    parser=argparse.ArgumentParser();group=parser.add_mutually_exclusive_group();group.add_argument('--input',type=Path);group.add_argument('--cloud-run',action='store_true');args=parser.parse_args()
     try:
-        data=None
+        data={'action':'cloud_run'} if args.cloud_run else None
         if args.input:
             if args.input.stat().st_size>20000:raise ValueError('Input too large')
             data=json.loads(args.input.read_text(encoding='utf-8'))

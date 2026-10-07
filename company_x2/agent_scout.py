@@ -74,4 +74,4 @@ def summary(store):
     return {'last_success_at':checked,'seconds_since_success':age,'attention_required':age is None or age>7200,
         'retained':len(saved.get('items',[])),'review':counts['review'],
         'recent_runs':saved.get('recent_runs',[])[:24],
-        'notice':'2時間以上成功がない場合は確認が必要です。定期実行はPCとアプリの稼働に依存します。'}
+        'notice':'2時間以上成功がない場合は確認が必要です。実行履歴とクラウドCronの稼働状態を確認してください。'}
