@@ -44,7 +44,7 @@ class CompanyHTTPTests(unittest.TestCase):
         payload.update(plan_sha256=plan['plan_sha256'],terms_accepted=True,request_key=key)
         return self.call('/api/company/transactions',payload)['id'],payload
     def test_http_contract_production_download_digest_and_receipt(self):
-        self.assertIn(b'E10',self.call('/company',decode=False))
+        self.assertIn(b'E11',self.call('/company',decode=False))
         order,payload=self.order()
         self.assertEqual(self.call('/api/company/transactions',payload)['id'],order)
         process_transaction(self.store)
