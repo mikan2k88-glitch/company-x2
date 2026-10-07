@@ -42,7 +42,7 @@ def get_route(handler, path, store, ai, payments, scout_enabled):
 def post_route(handler, path, data, store, ai, payments):
     if path == '/api/company/ai':
         if data.get('ai_terms_accepted') is not True:
-            raise ValueError('依頼文をOpenAIへ送信することへの同意が必要です')
+            raise ValueError('依頼文を設定済みのAI提供元へ送信することへの同意が必要です')
         handler.respond(200,ai.analyze(store,data.get('request'),handler.token()))
     elif path == '/api/company/quote':
         handler.respond(200,{'plan':quote(data.get('service_key'),data.get('csv'),data.get('payment_mode','sandbox'))})
