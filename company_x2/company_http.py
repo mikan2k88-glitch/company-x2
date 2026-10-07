@@ -5,6 +5,7 @@ from .data_services import make_artifact, SERVICES
 from .payments import Payments
 from .public_scout import snapshot
 from .acquisition import organize, draft
+from .cloud_scout import run as cloud_run
 from .agent_scout import state as agent_state, register as agent_register, summary as agent_summary
 
 
@@ -51,7 +52,7 @@ def get_route(handler, path, store, ai, payments, scout_enabled):
 
 def post_route(handler, path, data, store, ai, payments):
     if path == '/api/company/agent-scout':
-        handler.respond(200,agent_register(store,data))
+        handler.respond(200,cloud_run(store) if data.get('action')=='cloud_run' else agent_register(store,data))
     elif path == '/api/company/lead-draft':
         handler.respond(200,draft((agent_state(store).get('items',[])+snapshot(store).get('items',[]))[:30],data.get('source_url')))
     elif path == '/api/company/ai':

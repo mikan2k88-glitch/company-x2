@@ -84,7 +84,7 @@ def company_status(store, ai, payments):
     except (StorageUnavailable, ValueError):
         ready, overview = False, None
         database_error = '009_company.sqlをSupabaseに適用してください'
-    return {'endpoint': 'E12', 'database_ready': ready, 'database_error': database_error,
+    return {'endpoint': 'E13', 'database_ready': ready, 'database_error': database_error,
             'ai': ai.status(), 'payments': payments.status(), 'overview': overview,
             'outreach_enabled': False, 'live_payments_enabled': False,
             'autonomy': '検証注文の受付後は制作・検品・納品準備まで自動。営業と実決済は未稼働。'}
