@@ -57,7 +57,21 @@ def register(store, data, fetcher=fetch_issue):
     by_url={i['url']:i for i in incoming}
     items=incoming+[i for i in saved.get('items',[]) if i['url'] not in by_url and i['url'] not in urls]
     result={'source':SOURCE,'external_id':KEY,'items':items[:30],'checkpoint':checkpoint,
-        'checked_at':checked,'recent_runs':([{'key':run,'fingerprint':fingerprint}]+saved.get('recent_runs',[]))[:24],
+        'checked_at':checked,'recent_runs':([{'key':run,'fingerprint':fingerprint,'checked_at':checked,'collected':len(incoming),'new_candidates':sum(i['url'] not in {x['url'] for x in saved.get('items',[])} for i in incoming)}]+saved.get('recent_runs',[]))[:24],
         'decision':'blocked','reason':'定期探索の状態。募集・報酬・応募許可は未確認です'}
     store.save_opportunity(result,result['decision'],result['reason'])
     return {'saved':True,'replayed':False,'collected':len(incoming),'retained':len(result['items']),'checkpoint':checkpoint}
+
+
+def summary(store):
+    from .acquisition import organize
+    saved=state(store)
+    counts=organize(saved.get('items',[]))['summary']
+    checked=saved.get('checked_at')
+    age=None
+    if checked:
+        age=max(0,int((datetime.now(timezone.utc)-datetime.fromisoformat(checked)).total_seconds()))
+    return {'last_success_at':checked,'seconds_since_success':age,'attention_required':age is None or age>7200,
+        'retained':len(saved.get('items',[])),'review':counts['review'],
+        'recent_runs':saved.get('recent_runs',[])[:24],
+        'notice':'2時間以上成功がない場合は確認が必要です。定期実行はPCとアプリの稼働に依存します。'}

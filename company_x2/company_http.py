@@ -5,11 +5,13 @@ from .data_services import make_artifact, SERVICES
 from .payments import Payments
 from .public_scout import snapshot
 from .acquisition import organize, draft
-from .agent_scout import state as agent_state, register as agent_register
+from .agent_scout import state as agent_state, register as agent_register, summary as agent_summary
 
 
 def get_route(handler, path, store, ai, payments, scout_enabled):
-    if path == '/api/company/agent-scout':
+    if path == '/api/company/agent-scout/status':
+        handler.respond(200,agent_summary(store))
+    elif path == '/api/company/agent-scout':
         handler.respond(200,agent_state(store))
     elif path == '/api/company/status':
         handler.respond(200, company_status(store,ai,payments))
