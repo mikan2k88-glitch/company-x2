@@ -118,9 +118,9 @@ begin
   select state into job_state from company_x2.company_refund_jobs where order_id=p_payload->>'id';
   v:=v||jsonb_build_object('refund',jsonb_build_object('state',coalesce(job_state,'none'),'items',items,'refunded_jpy',refunded));
  elsif p_action='overview' then
-  select coalesce(sum(f.amount) filter(where o.plan->>'payment_mode'='stripe_live'),0),
-   coalesce(sum(f.amount) filter(where o.plan->>'payment_mode'='stripe_test'),0) into refunded,total
-   from company_x2.company_refunds f join company_x2.company_orders o on o.id=f.order_id where f.status='succeeded';
+  select coalesce(sum(rf.amount) filter(where o.plan->>'payment_mode'='stripe_live'),0),
+   coalesce(sum(rf.amount) filter(where o.plan->>'payment_mode'='stripe_test'),0) into refunded,total
+   from company_x2.company_refunds rf join company_x2.company_orders o on o.id=rf.order_id where rf.status='succeeded';
   select coalesce(jsonb_object_agg(state,n),'{}'::jsonb) into items from (select state,count(*) n from company_x2.company_refund_jobs group by state) s;
   v:=v||jsonb_build_object('live_refunded_jpy',refunded,'test_refunded_jpy',total,'refund_counts',items);
   select coalesce(jsonb_agg(x.item||jsonb_build_object('refund_state',coalesce(j.state,'none'))),'[]'::jsonb) into items
