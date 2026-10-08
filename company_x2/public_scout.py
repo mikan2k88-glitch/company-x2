@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlencode, urlparse
 
 from .supabase_store import NoRedirect, StorageUnavailable
+from .github_source import read_json, GitHubUnavailable
 
 QUERY = 'is:issue is:open csv label:bounty in:title,body'
 SOURCE = 'github_public_bounty'
@@ -16,30 +17,23 @@ INTERVAL = 3600
 
 
 class SourceUnavailable(RuntimeError):
-    pass
+    def __init__(self, message, retry_after=300):
+        self.retry_after=retry_after
+        super().__init__(message)
 
 
 def fetch_issues(opener=None):
     url = 'https://api.github.com/search/issues?' + urlencode(
         {'q': QUERY, 'per_page': LIMIT, 'sort': 'updated', 'order': 'desc'})
-    request = urllib.request.Request(url, headers={
-        'Accept': 'application/vnd.github+json', 'User-Agent': 'Company-X2-public-scout',
-        'X-GitHub-Api-Version': '2022-11-28'}, method='GET')
     try:
-        with (opener or urllib.request.build_opener(NoRedirect()).open)(request, timeout=20) as response:
-            raw = response.read(MAX_RESPONSE + 1)
-        if len(raw) > MAX_RESPONSE:
-            raise SourceUnavailable('募集データが取得上限を超えました')
-        payload = json.loads(raw)
+        payload = read_json(url,'public_search',opener=opener)
         if not isinstance(payload, dict) or not isinstance(payload.get('items'), list):
             raise ValueError('Invalid search response')
         if payload.get('incomplete_results') is not False:
             raise SourceUnavailable('検索結果が不完全です。時間を置いて再試行します')
         return payload
-    except urllib.error.HTTPError as exc:
-        if exc.code in (403, 429):
-            raise SourceUnavailable('GitHubの取得制限に達しました。時間を置いて再試行します') from None
-        raise SourceUnavailable(f'GitHub APIが取得できませんでした（HTTP {exc.code}）') from None
+    except GitHubUnavailable as exc:
+        raise SourceUnavailable(str(exc),exc.retry_after) from None
     except (urllib.error.URLError, TimeoutError, ValueError, UnicodeError):
         raise SourceUnavailable('GitHub APIの接続または応答を確認できませんでした') from None
 
@@ -115,7 +109,7 @@ def scan_once(store, *, fetcher=fetch_issues, interval=INTERVAL):
                   'rejected': sum(i['decision'] == 'rejected' for i in items),
                   'scope': '最新の最大30件。全募集の網羅検索ではありません', 'checked_at': checked}
     except SourceUnavailable as exc:
-        store.finish_scan(lease, error=str(exc), delay=300)
+        store.finish_scan(lease, error=str(exc), delay=exc.retry_after)
         return True
     except Exception:
         store.finish_scan(lease, error='募集データの検証に失敗しました。次回再試行します', delay=300)

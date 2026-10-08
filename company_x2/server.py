@@ -14,6 +14,7 @@ from .csv_service import MAX_BYTES
 from .discovery import qualify
 from .settings import build_store
 from .supabase_store import StorageUnavailable
+from .github_source import GitHubUnavailable
 from .worker import process_one
 from .public_scout import scan_once, snapshot
 from .data_services import SERVICES, require_service
@@ -99,7 +100,7 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
             if path == '/api/health':
                 if not store.ping():
                     return self.respond(503, {'status': 'storage_unavailable'})
-                return self.respond(200, {'status': 'ok', 'endpoint': 'E13', 'mode': 'sandbox',
+                return self.respond(200, {'status': 'ok', 'endpoint': 'E14', 'mode': 'sandbox',
                     'storage': 'supabase' if hasattr(store, 'rpc') else 'sqlite',
                     'payments_enabled': False, 'outreach_enabled': False, 'ai_connected': False})
             if not self.access_allowed():
@@ -223,6 +224,10 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
                     store.save_opportunity(data, decision, reason)
                     return self.respond(200, {'decision': decision, 'reason': reason, 'proposal_sent': False})
                 return self.respond(404, {'error': 'Not found'})
+            except GitHubUnavailable as exc:
+                logging.warning('Scout source unavailable: stage=%s reason=%s status=%s',exc.stage,exc.reason,exc.status)
+                return self.respond(503, {'error':'Public source unavailable; checkpoint unchanged',
+                                          'diagnostic':exc.diagnostic()})
             except StorageUnavailable:
                 return self.respond(503, {'error': 'Storage unavailable; retry with the same request key'})
             except (ValueError, UnicodeError, TimeoutError) as exc:
