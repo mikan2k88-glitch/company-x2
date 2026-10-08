@@ -33,3 +33,27 @@ def permits(method,path):
         return path=='/api/intake/config' or bool(re.fullmatch(r'/api/company/transactions/[A-Za-z0-9_-]+(?:/download)?',path))
     return method=='POST' and path in ('/api/company/quote','/api/company/transactions',
         '/api/company/checkout','/api/company/reconcile','/api/company/receipt')
+
+def public_issue(key,owner,now=None):
+    from .public_intake import owner_hash
+    expires=int(time.time() if now is None else now)+3600
+    body=encode(json.dumps({'scope':'public_free','exp':expires,'owner':owner_hash(owner),
+        'nonce':secrets.token_hex(16)},separators=(',',':')).encode())
+    return body+'.'+encode(hmac.new(key.encode(),body.encode(),hashlib.sha256).digest()),expires
+
+def public_valid(token,key,owner,now=None):
+    from .public_intake import owner_hash
+    if not isinstance(token,str) or len(token)>512:return False
+    try:
+        body,signature=token.split('.')
+        expected=encode(hmac.new(key.encode(),body.encode(),hashlib.sha256).digest())
+        if not hmac.compare_digest(signature.encode(),expected.encode()):return False
+        data=json.loads(base64.urlsafe_b64decode(body+'='*(-len(body)%4)))
+        current=int(time.time() if now is None else now)
+        return (data.get('scope')=='public_free' and type(data.get('exp')) is int
+            and current<data['exp']<=current+3600 and data.get('owner')==owner_hash(owner))
+    except (ValueError,UnicodeError,TypeError):return False
+
+def public_permits(method,path):
+    return (method=='GET' and permits(method,path)) or (method=='POST' and path in
+        ('/api/company/quote','/api/company/transactions','/api/company/receipt'))
