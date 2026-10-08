@@ -28,6 +28,8 @@ class PostgresTests(unittest.TestCase):
         cls.sql(Path('supabase/migrations/004_data_services.sql').read_text())
         cls.sql(Path('supabase/migrations/009_company.sql').read_text())
         cls.sql(Path('supabase/migrations/009_company.sql').read_text())
+        cls.sql(Path('supabase/migrations/019_live_payments.sql').read_text())
+        cls.sql(Path('supabase/migrations/019_live_payments.sql').read_text())
 
     def setUp(self):
         self.sql('truncate company_x2.company_payment_events,company_x2.company_events,company_x2.company_orders,company_x2.company_ai_calls cascade;')
@@ -98,6 +100,35 @@ class PostgresTests(unittest.TestCase):
         self.assertIsNone(self.company_rpc('claim'))
         self.assertEqual(self.company_rpc('overview')['test_payments_jpy'],100)
         self.assertEqual(self.company_rpc('overview')['real_revenue_jpy'],0)
+
+    def test_live_payment_mode_price_and_receipt_ledger(self):
+        from company_x2.company import quote,validate_creation
+        plan=quote('csv_to_json','id\n001\n','stripe_live',300,'https://example.com/terms')
+        payload=validate_creation({'csv':'id\n001\n','service_key':'csv_to_json','payment_mode':'stripe_live',
+            'terms_accepted':True,'request_key':'live-key-1234567890','plan_sha256':plan['plan_sha256']},'t'*32,300,'https://example.com/terms')
+        order=self.company_rpc('create',payload)
+        self.assertEqual(self.company_rpc('live_ping'),{'live_schema_version':19})
+        with self.assertRaises(subprocess.CalledProcessError):self.company_rpc('session',{'id':order,'token_hash':payload['token_hash'],
+            'session_id':'cs_test_wrong','session_url':'https://checkout.stripe.com/c/pay/test'})
+        self.company_rpc('session',{'id':order,'token_hash':payload['token_hash'],'session_id':'cs_live_fixture','session_url':'https://checkout.stripe.com/c/pay/live'})
+        proof={'id':order,'session_id':'cs_live_fixture','event_id':'evt_livesql','fingerprint':'a'*64,
+            'amount':300,'currency':'jpy','livemode':True,'payment_status':'paid'}
+        for change in ({'amount':299},{'livemode':False},{'currency':'usd'}):
+            with self.assertRaises(subprocess.CalledProcessError):self.company_rpc('payment',{**proof,**change})
+        self.company_rpc('payment',proof);self.company_rpc('payment',proof)
+        self.assertEqual(self.company_rpc('overview')['live_collected_jpy'],300)
+        self.assertEqual(self.company_rpc('overview')['test_payments_jpy'],0)
+        self.assertEqual(self.company_rpc('overview')['real_revenue_jpy'],0)
+        from company_x2.company import process_transaction
+        from company_x2.supabase_store import SupabaseStore
+        import io,json
+        def opener(req,timeout):
+            body=json.loads(req.data);return io.BytesIO(json.dumps(self.company_rpc(body['p_action'],body['p_payload'])).encode())
+        store=SupabaseStore('https://example.supabase.co','sb_secret_test',opener=opener)
+        self.assertTrue(process_transaction(store))
+        saved=self.company_rpc('get',{'id':order,'token_hash':payload['token_hash']})
+        self.company_rpc('receipt',{'id':order,'token_hash':payload['token_hash'],'download_sha256':saved['result']['download_sha256']})
+        self.assertEqual(self.company_rpc('overview')['real_revenue_jpy'],300)
 
     def test_company_budget_concurrency_and_restart(self):
         from concurrent.futures import ThreadPoolExecutor

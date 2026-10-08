@@ -25,19 +25,22 @@ def rank_candidates(items):
     return sorted(ranked, key=lambda item: (-item['score'], item.get('external_id', '')))
 
 
-def quote(service, text, mode='sandbox'):
-    if not isinstance(service,str) or service not in SERVICES or mode not in ('sandbox', 'stripe_test'):
+def quote(service, text, mode='sandbox',live_price=None,terms_url=None):
+    if not isinstance(service,str) or service not in SERVICES or mode not in ('sandbox', 'stripe_test','stripe_live'):
         raise ValueError('対応サービスと検証モードを指定してください')
+    if mode=='stripe_live' and (type(live_price) is not int or not 50<=live_price<=10000 or not isinstance(terms_url,str) or not terms_url.startswith('https://')):
+        raise ValueError('Live pricing and sales terms are required')
     plan = plan_request(REQUESTS[service][0], text)
     plan.update(payment_mode=mode, price_jpy=100 if mode == 'stripe_test' else 0,
                 currency='jpy', terms_version='e09-v1', test_payment=mode == 'stripe_test')
+    if mode=='stripe_live':plan.update(price_jpy=live_price,terms_version='e19-live-v1',sales_terms_url=terms_url)
     plan.pop('plan_sha256')
     plan['plan_sha256'] = hashlib.sha256(json.dumps(plan, ensure_ascii=False, sort_keys=True,
                                                  separators=(',', ':')).encode()).hexdigest()
     return plan
 
 
-def validate_creation(data, token):
+def validate_creation(data, token,live_price=None,terms_url=None):
     if not isinstance(token, str) or not 32 <= len(token) <= 128:
         raise ValueError('所有者トークンが必要です')
     key = data.get('request_key')
@@ -45,7 +48,7 @@ def validate_creation(data, token):
         raise ValueError('受付キーを確認してください')
     if data.get('terms_accepted') is not True:
         raise ValueError('処理範囲・料金・検証条件への同意が必要です')
-    plan = quote(data.get('service_key'), data.get('csv'), data.get('payment_mode', 'sandbox'))
+    plan = quote(data.get('service_key'), data.get('csv'), data.get('payment_mode', 'sandbox'),live_price,terms_url)
     if data.get('plan_sha256') != plan['plan_sha256']:
         raise ValueError('計画か入力が変わりました。見積もりを作り直してください')
     source = data.get('source_url') or ''
@@ -84,7 +87,8 @@ def company_status(store, ai, payments):
     except (StorageUnavailable, ValueError):
         ready, overview = False, None
         database_error = '009_company.sqlをSupabaseに適用してください'
-    return {'endpoint': 'E13', 'database_ready': ready, 'database_error': database_error,
+    live=payments.live_status(store)
+    return {'endpoint': 'E19', 'database_ready': ready, 'database_error': database_error,
             'ai': ai.status(), 'payments': payments.status(), 'overview': overview,
-            'outreach_enabled': False, 'live_payments_enabled': False,
+            'outreach_enabled': False, 'live_payments_enabled':live['ready'], 'live_payments':live,
             'autonomy': '検証注文の受付後は制作・検品・納品準備まで自動。営業と実決済は未稼働。'}
