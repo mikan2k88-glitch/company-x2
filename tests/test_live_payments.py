@@ -27,11 +27,16 @@ class LiveHTTPTests(unittest.TestCase):
         self.payments.__dict__.update(Payments(ENV,opener).__dict__)
 
     def test_live_channel_payment_to_delivery_and_test_evidence_isolation(self):
+        # Exercise the legacy live lifecycle in isolation. The production policy
+        # gate is covered separately and cannot be enabled by environment values.
+        self.payments.live_status=lambda store=None: {'ready':True,'mode':'stripe_live','price_jpy':300,
+            'terms_url':ENV['SALES_TERMS_URL'],'schema_ready':True,'reasons':[]}
         link=self.call('/api/company/intake-link',{'service_key':'csv_to_json','payment_mode':'stripe_live'})
         access=parse_qs(urlparse(link['url']).fragment)['access'][0]
         def customer(path,data=None):return self.call(path,data,auth=False,headers={'X-Intake-Access':access})
         self.assertTrue(customer('/api/intake/config')['live_payments_ready'])
-        chosen={'service_key':'csv_to_json','csv':'id\n001\n','payment_mode':'stripe_live'}
+        chosen={'service_key':'csv_to_json','csv':'id\n001\n','payment_mode':'stripe_live',
+            'risk_context':dict(sensitive_data='no',critical_use='no',extra_liability='no')}
         plan=customer('/api/company/quote',chosen)['plan']
         self.assertEqual(plan['price_jpy'],300);self.assertEqual(plan['sales_terms_url'],ENV['SALES_TERMS_URL'])
         payload={**chosen,'plan_sha256':plan['plan_sha256'],'terms_accepted':True,'request_key':'l'*32}
