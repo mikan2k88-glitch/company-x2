@@ -64,9 +64,9 @@ def register(store, data, fetcher=fetch_issue):
 
 
 def summary(store, saved=None):
-    from .acquisition import organize
+    from .sales import assess
     saved=state(store) if saved is None else saved
-    counts=organize(saved.get('items',[]))['summary']
+    counts=assess(saved.get('items',[]))['summary']
     runs=saved.get('recent_runs',[])
     successful=next((r for r in runs if not r['key'].startswith('attempt_')),None)
     checked=successful.get('checked_at') if successful else None
@@ -76,6 +76,7 @@ def summary(store, saved=None):
     return {'last_success_at':checked,'last_attempt_at':saved.get('last_attempt_at',saved.get('checked_at')),
         'last_failure':saved.get('last_failure'),
         'seconds_since_success':age,'attention_required':age is None or age>7200,
-        'retained':len(saved.get('items',[])),'review':counts['review'],
+        'retained':len(saved.get('items',[])),'review':counts['scope_candidate'],
         'recent_runs':saved.get('recent_runs',[])[:24],
         'notice':'2時間以上成功がない場合は確認が必要です。attempt_は失敗記録で、探索成功に数えません。クラウドタスクの実行履歴を確認してください。'}
+
