@@ -35,3 +35,15 @@ class CloudScoutTests(unittest.TestCase):
     def test_search_rejects_partial_results(self):
         import io,json
         with self.assertRaises(StorageUnavailable):search(QUERIES[0],lambda *a,**k:io.BytesIO(json.dumps({'items':[],'incomplete_results':True}).encode()))
+
+    def test_scope_candidate_is_retained_before_irrelevant_search_hits(self):
+        raw=[{**issue(),'id':n,'html_url':f'https://github.com/example/jobs/issues/{n}',
+            'title':f'docs CSV to JSON bounty proposal $10 example {n}'} for n in range(1,5)]
+        candidate={**issue(),'id':5,'html_url':'https://github.com/example/jobs/issues/5',
+            'title':'Please convert my CSV to JSON for $10'}
+        raw.append(candidate)
+        by_url={x['html_url']:x for x in raw}
+        run(self.store,lambda q:raw,lambda url:by_url[url],self.now)
+        urls=[x['url'] for x in state(self.store)['items']]
+        self.assertIn(candidate['html_url'],urls)
+        self.assertEqual(len(urls),4)

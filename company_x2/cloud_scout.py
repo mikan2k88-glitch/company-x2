@@ -9,7 +9,11 @@ QUERIES=(
  'is:issue is:open csv bounty dedup in:title,body',
  'is:issue is:open csv bounty trim in:title,body',
  'is:issue is:open csv bounty json in:title,body',
- 'is:issue is:open csv bounty audit in:title,body')
+ 'is:issue is:open csv bounty audit in:title,body',
+ 'is:issue is:open "csv to json" "need" in:title,body',
+ 'is:issue is:open csv dedup "paid" in:title,body',
+ 'is:issue is:open csv trim "request" in:title,body',
+ 'is:issue is:open csv "data quality" "bounty" in:title,body')
 
 def search(query,opener=None):
     url='https://api.github.com/search/issues?'+urlencode({'q':query,'sort':'updated','order':'desc','per_page':10})
@@ -53,7 +57,9 @@ def discover(store,saved,key,searcher,issue_fetcher,now):
     raw=searcher(query)
     checked=now.isoformat()
     candidates=[item for issue in raw if (item:=normalize(issue,checked)) is not None]
-    candidates.sort(key=lambda x:x['decision']!='needs_review')
+    from .sales import assess
+    candidates=assess(candidates,now=now)['items']
+    candidates.sort(key=lambda x:(not x['sales_candidate'],x['decision']!='needs_review'))
     urls=list(dict.fromkeys(x['url'] for x in candidates))[:4]
     if saved.get('items'):
         previous_url=saved['items'][-1]['url']

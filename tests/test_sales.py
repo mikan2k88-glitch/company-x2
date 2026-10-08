@@ -32,6 +32,31 @@ class SalesTests(unittest.TestCase):
         self.assertIn('AI',draft['message']);self.assertGreaterEqual(len(draft['missing_evidence']),5)
         self.assertFalse(report['items'][0]['auto_contact_allowed'])
 
+    def test_deadline_evidence_and_estimate(self):
+        now=datetime(2026,10,8,tzinfo=timezone.utc)
+        data=listing(description='Please convert CSV to JSON.\nDeadline: 2026-10-09\nPayment: $10 after delivery\nAI work allowed',source_updated_at=now.isoformat())
+        facts=assess([data],now)['items'][0]['sales_evidence']
+        self.assertEqual(facts['deadline_date'],'2026-10-09')
+        self.assertFalse(facts['verified'])
+        self.assertIn('$10',facts['quotes']['payment_terms'])
+        estimate=proposal([listing()],data['url'])['estimate']
+        self.assertIsNone(estimate['live_amount'])
+        self.assertFalse(estimate['deadline_committed'])
+        self.assertEqual(estimate['options'][0]['service_key'],'csv_to_json')
+        expired=assess([dict(data,description='Please convert CSV to JSON. Deadline: 2026-10-07')],now)
+        self.assertEqual(expired['summary']['scope_candidate'],0)
+        self.assertTrue(expired['items'][0]['sales_evidence']['deadline_expired'])
+
+    def test_ambiguous_deadline_and_duplicates(self):
+        data=listing(description='Please convert CSV to JSON. Deadline: next week. AI prohibited.')
+        report=assess([data,data])
+        self.assertEqual(report['evaluated_count'],2)
+        self.assertEqual(report['summary']['scope_candidate'],1)
+        self.assertEqual(report['summary']['excluded'],1)
+        self.assertIsNone(report['items'][0]['sales_evidence']['deadline_date'])
+        self.assertFalse(report['items'][0]['auto_contact_allowed'])
+        self.assertTrue(report['exclusion_reasons'])
+
     def test_grant_expiry_tampering_rotation_and_scopes(self):
         token,expiry=issue('secret-key',now=100)
         self.assertTrue(valid(token,'secret-key',now=100))
