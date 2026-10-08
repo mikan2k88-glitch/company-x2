@@ -1,11 +1,9 @@
-"""PC-independent hourly discovery, invoked by a scoped Render cron client."""
-import json
-import urllib.request
-from datetime import datetime, timezone
+"""PC-independent discovery, invoked by the authenticated cloud task."""
+from datetime import datetime, timezone, timedelta
 from urllib.parse import urlencode
 from .agent_scout import register,state,fetch_issue
-from .public_scout import normalize,MAX_RESPONSE
-from .supabase_store import NoRedirect,StorageUnavailable
+from .public_scout import normalize
+from .github_source import read_json, GitHubUnavailable
 
 QUERIES=(
  'is:issue is:open csv bounty dedup in:title,body',
@@ -15,14 +13,12 @@ QUERIES=(
 
 def search(query,opener=None):
     url='https://api.github.com/search/issues?'+urlencode({'q':query,'sort':'updated','order':'desc','per_page':10})
-    req=urllib.request.Request(url,headers={'Accept':'application/vnd.github+json','User-Agent':'Company-X2-cloud-scout'})
-    try:
-        with (opener or urllib.request.build_opener(NoRedirect()).open)(req,timeout=20) as res:raw=res.read(MAX_RESPONSE+1)
-        if len(raw)>MAX_RESPONSE:raise ValueError('Search too large')
-        data=json.loads(raw)
-        if not isinstance(data,dict) or data.get('incomplete_results') is not False or not isinstance(data.get('items'),list):raise ValueError('Incomplete search')
-        return data['items'][:10]
-    except (OSError,ValueError):raise StorageUnavailable('クラウド探索の取得に失敗しました。次回再試行します') from None
+    data=read_json(url,'search',opener=opener)
+    if not isinstance(data,dict) or not isinstance(data.get('items'),list):
+        raise GitHubUnavailable('search','invalid_search_response')
+    if data.get('incomplete_results') is not False:
+        raise GitHubUnavailable('search','incomplete_search')
+    return data['items'][:10]
 
 def run(store,searcher=search,issue_fetcher=fetch_issue,now=None):
     now=now or datetime.now(timezone.utc)
@@ -30,6 +26,25 @@ def run(store,searcher=search,issue_fetcher=fetch_issue,now=None):
     saved=state(store)
     if any(x['key']==key for x in saved.get('recent_runs',[])):
         return {'saved':True,'replayed':True,'run_key':key}
+    failure=saved.get('last_failure') or {}
+    if failure.get('retry_at') and datetime.fromisoformat(failure['retry_at'])>now:
+        diagnostic=failure['diagnostic']
+        remaining=int((datetime.fromisoformat(failure['retry_at'])-now).total_seconds())
+        raise GitHubUnavailable(diagnostic['stage'],diagnostic['reason'],
+            status=diagnostic.get('http_status'),retry_after=remaining)
+    try:
+        return discover(store,saved,key,searcher,issue_fetcher,now)
+    except GitHubUnavailable as exc:
+        # Record source failures without pretending the source was refreshed.
+        record={**saved,'last_failure':{'checked_at':now.isoformat(),
+            'retry_at':(now+timedelta(seconds=exc.retry_after)).isoformat(),
+            'diagnostic':exc.diagnostic()},'last_attempt_at':now.isoformat()}
+        store.save_opportunity(record,record.get('decision','blocked'),
+            record.get('reason','定期探索の取得待ち'))
+        raise
+
+
+def discover(store,saved,key,searcher,issue_fetcher,now):
     # A deterministic rotation can resume after a failed run without advancing.
     old=saved.get('checkpoint') or {}
     previous=old.get('next_query')
@@ -46,4 +61,4 @@ def run(store,searcher=search,issue_fetcher=fetch_issue,now=None):
     result=register(store,{'run_key':key,'urls':urls,'checkpoint':{
         'next_query':QUERIES[(index+1)%len(QUERIES)],
         'note':'Renderクラウド探索。検索 '+query+' / 取得 '+str(len(raw))+'件。募集・報酬・応募許可は未確認。'}},issue_fetcher)
-    return {**result,'run_key':key,'query':query,'search_count':len(raw),'execution':'render_cron'}
+    return {**result,'run_key':key,'query':query,'search_count':len(raw),'execution':'cloud_api'}

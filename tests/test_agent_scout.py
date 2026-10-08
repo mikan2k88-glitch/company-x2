@@ -53,10 +53,11 @@ class AgentHTTPTests(unittest.TestCase):
         from datetime import datetime,timezone
         raw={**issue(),'updated_at':datetime.now(timezone.utc).isoformat()}
         data={'run_key':'hourly_test_000001','urls':[URL],'checkpoint':{'note':'done'}}
-        with patch('company_x2.agent_scout.urllib.request.build_opener') as mocked:
+        with patch('company_x2.github_source.urllib.request.build_opener') as mocked:
             import io,json
             mocked.return_value.open.return_value=io.BytesIO(json.dumps(raw).encode())
             self.assertTrue(self.call('/api/company/agent-scout',data)['saved'])
         self.assertEqual(self.call('/api/company/agent-scout')['checkpoint'],{'note':'done'})
         self.assertEqual(self.call('/api/company/candidates')['summary']['review'],1)
         self.assertEqual(self.call('/api/company/lead-draft',{'source_url':URL})['options'][0]['service_key'],'csv_to_json')
+

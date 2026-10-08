@@ -44,7 +44,7 @@ class CompanyHTTPTests(unittest.TestCase):
         payload.update(plan_sha256=plan['plan_sha256'],terms_accepted=True,request_key=key)
         return self.call('/api/company/transactions',payload)['id'],payload
     def test_http_contract_production_download_digest_and_receipt(self):
-        self.assertIn(b'E13',self.call('/company',decode=False))
+        self.assertIn(b'E14',self.call('/company',decode=False))
         order,payload=self.order()
         self.assertEqual(self.call('/api/company/transactions',payload)['id'],order)
         process_transaction(self.store)
@@ -82,3 +82,4 @@ class CompanyHTTPTests(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError):self.call('/api/company/transactions',{**payload,'csv':'id\n999\n'})
         with self.assertRaises(urllib.error.HTTPError):self.call('/api/company/ai',{'request':'convert'})
         with self.assertRaises(urllib.error.HTTPError):self.call('/api/company/quote',{'service_key':[],'csv':'a\n1\n'})
+

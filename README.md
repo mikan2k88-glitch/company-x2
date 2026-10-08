@@ -34,3 +34,5 @@ python -m company_x2.server --port 8080
 [起動方法・運用範囲](docs/RUNBOOK.md)。ローカル画面は http://127.0.0.1:8080 です。
 Renderではパスワード付き限定試作として起動できます。[RenderとSupabaseの設定手順](docs/RENDER.md)。
 一般公開の有料サービス用HTTPサーバーではありません。実取引ルールとsandbox注文は分離し、無料加工を売上として計上しません。
+
+E14でクラウド探索の障害診断・待機と、失敗記録を除いた成功表示を追加しました。[E14の運用](docs/E14.md)。無料RenderとChatGPTクラウドタスクを利用し、追加SQLは不要です。

@@ -13,7 +13,8 @@ def get_route(handler, path, store, ai, payments, scout_enabled):
     if path == '/api/company/agent-scout/status':
         handler.respond(200,agent_summary(store))
     elif path == '/api/company/agent-scout':
-        handler.respond(200,agent_state(store))
+        saved=agent_state(store)
+        handler.respond(200,{**saved,'scout_status':agent_summary(store,saved)})
     elif path == '/api/company/status':
         handler.respond(200, company_status(store,ai,payments))
     elif path == '/api/company/candidates':

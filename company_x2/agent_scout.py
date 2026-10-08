@@ -2,10 +2,9 @@
 import hashlib
 import json
 import re
-import urllib.request
 from datetime import datetime, timezone
-from .public_scout import normalize, MAX_RESPONSE, SourceUnavailable
-from .supabase_store import NoRedirect, StorageUnavailable
+from .public_scout import normalize
+from .github_source import read_json, GitHubUnavailable
 
 SOURCE = 'scheduled_agent_scout'
 KEY = 'main'
@@ -18,17 +17,11 @@ def fetch_issue(url, opener=None):
     match = re.fullmatch(r'https://github\.com/([\w.-]+)/([\w.-]+)/issues/([1-9][0-9]*)',url)
     if not match:
         raise ValueError('GitHubの公開Issue URLを指定してください')
-    req = urllib.request.Request('https://api.github.com/repos/'+match[1]+'/'+match[2]+'/issues/'+match[3],
-        headers={'Accept':'application/vnd.github+json','User-Agent':'Company-X2-agent-scout'})
-    try:
-        with (opener or urllib.request.build_opener(NoRedirect()).open)(req,timeout=15) as response:
-            raw=response.read(MAX_RESPONSE+1)
-        if len(raw)>MAX_RESPONSE: raise ValueError('Issue too large')
-        issue=json.loads(raw)
-        if not isinstance(issue,dict) or issue.get('html_url') != url: raise ValueError('Issue URL mismatch')
-        return issue
-    except (OSError,ValueError) as exc:
-        raise StorageUnavailable('公開Issueの取得・照合に失敗しました。保存せず再試行してください') from None
+    issue=read_json('https://api.github.com/repos/'+match[1]+'/'+match[2]+'/issues/'+match[3],
+                    'issue',opener=opener,timeout=15)
+    if not isinstance(issue,dict) or issue.get('html_url') != url:
+        raise GitHubUnavailable('issue','identity_mismatch')
+    return issue
 
 def register(store, data, fetcher=fetch_issue):
     urls=data.get('urls'); run=data.get('run_key'); checkpoint=data.get('checkpoint')
@@ -43,6 +36,9 @@ def register(store, data, fetcher=fetch_issue):
             raise ValueError('GitHubの公開Issue URLを指定してください')
     fingerprint=hashlib.sha256(json.dumps({'urls':urls,'checkpoint':checkpoint},sort_keys=True).encode()).hexdigest()
     saved=state(store)
+    failed_attempt=run.startswith('attempt_')
+    if failed_attempt and (urls or checkpoint.get('next_query') != (saved.get('checkpoint') or {}).get('next_query')):
+        raise ValueError('失敗記録では候補と探索範囲を変更できません')
     previous=next((r for r in saved.get('recent_runs',[]) if r['key']==run),None)
     if previous:
         if previous['fingerprint']!=fingerprint: raise ValueError('run_keyは同じ内容で再試行してください')
@@ -59,19 +55,27 @@ def register(store, data, fetcher=fetch_issue):
     result={'source':SOURCE,'external_id':KEY,'items':items[:30],'checkpoint':checkpoint,
         'checked_at':checked,'recent_runs':([{'key':run,'fingerprint':fingerprint,'checked_at':checked,'collected':len(incoming),'new_candidates':sum(i['url'] not in {x['url'] for x in saved.get('items',[])} for i in incoming)}]+saved.get('recent_runs',[]))[:24],
         'decision':'blocked','reason':'定期探索の状態。募集・報酬・応募許可は未確認です'}
+    if failed_attempt:
+        result['last_attempt_at']=checked
+        if saved.get('last_failure'):
+            result['last_failure']=saved['last_failure']
     store.save_opportunity(result,result['decision'],result['reason'])
     return {'saved':True,'replayed':False,'collected':len(incoming),'retained':len(result['items']),'checkpoint':checkpoint}
 
 
-def summary(store):
+def summary(store, saved=None):
     from .acquisition import organize
-    saved=state(store)
+    saved=state(store) if saved is None else saved
     counts=organize(saved.get('items',[]))['summary']
-    checked=saved.get('checked_at')
+    runs=saved.get('recent_runs',[])
+    successful=next((r for r in runs if not r['key'].startswith('attempt_')),None)
+    checked=successful.get('checked_at') if successful else None
     age=None
     if checked:
         age=max(0,int((datetime.now(timezone.utc)-datetime.fromisoformat(checked)).total_seconds()))
-    return {'last_success_at':checked,'seconds_since_success':age,'attention_required':age is None or age>7200,
+    return {'last_success_at':checked,'last_attempt_at':saved.get('last_attempt_at',saved.get('checked_at')),
+        'last_failure':saved.get('last_failure'),
+        'seconds_since_success':age,'attention_required':age is None or age>7200,
         'retained':len(saved.get('items',[])),'review':counts['review'],
         'recent_runs':saved.get('recent_runs',[])[:24],
-        'notice':'2時間以上成功がない場合は確認が必要です。実行履歴とクラウドCronの稼働状態を確認してください。'}
+        'notice':'2時間以上成功がない場合は確認が必要です。attempt_は失敗記録で、探索成功に数えません。クラウドタスクの実行履歴を確認してください。'}
