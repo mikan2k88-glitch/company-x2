@@ -1,6 +1,8 @@
 /* Curated UI translations only. Never translate customer CSV, hashes or identifiers. */
 (() => {
 const messages={
+'返金済み JPY ':'Refunded JPY ',
+'追加の返金は停止しています。運営者が状況を確認します。':'Further refunds are paused. The operator will review the status.',
 '返金対象を確認':'Refund eligibility confirmed',
 '返金処理中':'Preparing refund',
 '返金受付中':'Refund pending',
