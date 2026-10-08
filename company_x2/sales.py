@@ -62,7 +62,8 @@ def assess(items, now=None):
         'evaluated_count':len(ranked['items']),'items':ranked['items'],'summary':counts,'triage_summary':ranked['summary'],
         'notice':'金額やCSVの単語だけでは発注募集と判定しません。案内文は下書きです。'}
 
-def proposal(items,url):
+def proposal(items,url,language='ja'):
+    if language not in ('ja','en'):raise ValueError('Unsupported proposal language')
     item=next((x for x in assess(items)['items'] if x.get('url')==url and x['sales_candidate']),None)
     if item is None:raise ValueError('営業対象のCSV依頼候補を選んでください')
     names='・'.join(SERVICES[k]['name'] for k in item['service_keys'])
@@ -70,7 +71,12 @@ def proposal(items,url):
         '\n発注の意思、報酬額・通貨・支払い時期、納期、AIによる作業と応募の可否を確認させてください。'
         '\n現在の受付は無料検証またはStripeテスト100円です。実際の課金・報酬の受領は行いません。'
         '\n条件確認後、検証用の受付リンクをご案内します。機密データを公開Issueに添付しないでください。')
-    return {'source_url':url,'title':item['title'],'message':message,'draft_only':True,
+    if language=='en':
+        message=('Company X2 can process UTF-8 CSV up to 1 MB and 10,000 rows, using exact deduplication, whitespace trimming, CSV-to-JSON conversion or data auditing as applicable.'
+            '\nPlease confirm that this is a hiring request, the reward and currency, payment timing, deadline, permission for AI-assisted work and applications, and the actual input.'
+            '\nOur intake currently supports free verification or a JPY 100 Stripe test checkout only. No real payment is charged or received. Live price and delivery date are not committed.'
+            '\nAfter confirming the scope, we can share a test invitation link. Do not attach confidential data to public issues.')
+    return {'language':language,'source_url':url,'title':item['title'],'message':message,'draft_only':True,
             'sent':False,'evidence':item['sales_evidence'],
             'estimate':{'status':'input_required','currency':'JPY','live_amount':None,
                 'test_amount':100,'max_bytes':1000000,'max_rows':10000,
