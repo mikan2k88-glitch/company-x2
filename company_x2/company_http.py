@@ -33,9 +33,12 @@ def get_route(handler, path, store, ai, payments, scout_enabled):
         handler.respond(200,data)
     elif path == '/api/intake/config':
         ready = company_status(store,ai,payments)
+        live=ready['live_payments']
         handler.respond(200,{'database_ready':ready['database_ready'],
             'database_error':ready['database_error'], 'payments_ready':ready['payments']['ready'] and not getattr(handler,'public_customer',False),
             'public_free':getattr(handler,'public_customer',False),
+            'live_payments_ready':getattr(handler,'live_customer',False) and live['ready'],
+            'live_price_jpy':live['price_jpy'],'sales_terms_url':live['terms_url'],
             'max_bytes':public_intake.MAX_BYTES if getattr(handler,'public_customer',False) else 1000000,
             'max_rows':public_intake.MAX_ROWS if getattr(handler,'public_customer',False) else 10000})
     elif path.startswith('/api/company/transactions/'):
@@ -70,11 +73,13 @@ def post_route(handler, path, data, store, ai, payments):
         language=data.get('language','ja')
         if language not in ('ja','en'):raise ValueError('Unsupported customer language')
         service=require_service(data.get('service_key'))
-        token,expires=issue_intake(handler.intake_signing_key)
+        live=data.get('payment_mode')=='stripe_live'
+        if live and not payments.live_status(store)['ready']:raise ValueError('Live payments are not ready')
+        token,expires=issue_intake(handler.intake_signing_key,scope='intake_live' if live else 'intake_test')
         host=handler.headers.get('Host')
         scheme='http' if host.split(':')[0] in ('localhost','127.0.0.1') else 'https'
         handler.respond(200,{'url':scheme+'://'+host+'/intake?'+urlencode({'lang':language})+'#'+urlencode({'access':token,'service':service}),
-            'expires_at':datetime.fromtimestamp(expires,timezone.utc).isoformat(),'mode':'test_only','live_price_jpy':None})
+            'expires_at':datetime.fromtimestamp(expires,timezone.utc).isoformat(),'mode':'stripe_live' if live else 'test_only','live_price_jpy':payments.live_price if live else None})
     elif path == '/api/company/sales-proposal':
         handler.respond(200,sales_proposal((agent_state(store).get('items',[])+snapshot(store).get('items',[]))[:30],data.get('source_url'),data.get('language','ja')))
     elif path == '/api/company/agent-scout':
@@ -89,13 +94,16 @@ def post_route(handler, path, data, store, ai, payments):
         handler.respond(200,ai.analyze(store,data.get('request'),handler.token()))
     elif path == '/api/company/quote':
         if getattr(handler,'public_customer',False):public_intake.reserve_quote(store,data)
-        handler.respond(200,{'plan':quote(data.get('service_key'),data.get('csv'),data.get('payment_mode','sandbox'))})
+        mode=data.get('payment_mode','sandbox')
+        if mode=='stripe_live' and (not getattr(handler,'live_customer',False) or not payments.live_status(store)['ready']):raise ValueError('Live payments are not ready')
+        handler.respond(200,{'plan':quote(data.get('service_key'),data.get('csv'),mode,payments.live_price,payments.terms_url)})
     elif path == '/api/company/transactions':
         if getattr(handler,'public_customer',False):
             order=public_intake.create(store,data,handler.token())
             handler.respond(202,{'id':order,'mode':'sandbox','revenue_jpy':0})
             return True
-        payload = validate_creation(data,handler.token())
+        if data.get('payment_mode')=='stripe_live' and (not getattr(handler,'live_customer',False) or not payments.live_status(store)['ready']):raise ValueError('Live payments are not ready')
+        payload = validate_creation(data,handler.token(),payments.live_price,payments.terms_url)
         if payload['plan']['payment_mode']=='stripe_test' and not payments.status()['ready']:
             raise ValueError('Stripeテスト決済が未設定です')
         order = store.company_rpc('create',payload)

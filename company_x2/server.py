@@ -16,7 +16,7 @@ from .settings import build_store
 from .supabase_store import StorageUnavailable
 from .github_source import GitHubUnavailable
 from .intake_access import valid as valid_intake, permits as intake_permits
-from .intake_access import public_issue, public_valid, public_permits
+from .intake_access import public_issue, public_valid, public_permits, live_valid
 from . import public_intake
 from .worker import process_one
 from .public_scout import scan_once, snapshot
@@ -39,6 +39,7 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
             logging.info('HTTP %s', args[1] if len(args) > 1 else '')
 
         def respond(self, status, content, content_type='application/json; charset=utf-8', filename=None):
+            if status>=400:self.discard_body()
             data = content if isinstance(content, bytes) else json.dumps(content, ensure_ascii=False).encode()
             self.send_response(status)
             self.send_header('Content-Type', content_type)
@@ -54,6 +55,16 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
             self.end_headers()
             self.wfile.write(data)
 
+        def discard_body(self):
+            # Drain small rejected POSTs so closing the socket does not replace
+            # our HTTP error with a TCP reset on Windows clients.
+            if self.command!='POST' or getattr(self,'body_read',False):return
+            try:
+                size=int(self.headers.get('Content-Length','0'))
+                if 0<size<=65536:self.rfile.read(size)
+            except (ValueError,TimeoutError,OSError):pass
+            self.body_read=True
+
         def allowed_host(self):
             # Prevent DNS rebinding and cross-origin writes to the local service.
             expected = {f'127.0.0.1:{self.server.server_port}', f'localhost:{self.server.server_port}', *allowed_hosts}
@@ -64,6 +75,7 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
         def access_allowed(self):
             path=urlparse(self.path).path
             self.public_customer=False
+            self.live_customer=False
             grant=self.headers.get('X-Intake-Access','')
             if public_valid(grant,access_password or admin_token,self.headers.get('X-Order-Token','')):
                 if not public_permits(self.command,path):
@@ -76,6 +88,7 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
                 self.public_customer=True
                 return True
             if intake_permits(self.command,path) and valid_intake(self.headers.get('X-Intake-Access',''),access_password or admin_token):
+                self.live_customer=live_valid(grant,access_password or admin_token)
                 return True
             if intake_permits(self.command,path) and self.headers.get('X-Intake-Access'):
                 self.respond(401,{'error':'受付リンクの期限切れ、または無効なリンクです。新しいリンクが必要です'})
@@ -85,6 +98,7 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
                 if auth.startswith('Bearer ') and secrets.compare_digest(auth[7:].encode(),agent_token.encode()):
                     return True
             if not access_password:
+                self.live_customer=True
                 return True
             auth = self.headers.get('Authorization', '')
             try:
@@ -93,7 +107,9 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
             except (ValueError, UnicodeError):
                 password = ''
             if secrets.compare_digest(password.encode(), access_password.encode()):
+                self.live_customer=True
                 return True
+            self.discard_body()
             self.send_response(401)
             self.send_header('WWW-Authenticate', 'Basic realm="Company X2 Trial"')
             self.send_header('Content-Length', '0')
@@ -122,7 +138,7 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
             if path == '/api/health':
                 if not store.ping():
                     return self.respond(503, {'status': 'storage_unavailable'})
-                return self.respond(200, {'status': 'ok', 'endpoint': 'E18', 'mode': 'sandbox',
+                return self.respond(200, {'status': 'ok', 'endpoint': 'E19', 'mode': 'sandbox',
                     'storage': 'supabase' if hasattr(store, 'rpc') else 'sqlite',
                     'payments_enabled': False, 'outreach_enabled': False, 'ai_connected': False})
             if path == '/services':
@@ -182,17 +198,19 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
             return self.respond(404, {'error': 'Not found'})
 
         def do_POST(self):
+            self.body_read=False
             self.connection.settimeout(10)
             if not self.allowed_host():
                 return self.respond(403, {'error': 'Host or origin rejected'})
             path = urlparse(self.path).path
-            if path == '/api/payments/webhook':
+            if path in ('/api/payments/webhook','/api/payments/live-webhook'):
                 try:
                     size = int(self.headers.get('Content-Length','0'))
                     if not 0 < size <= 200_000:
                         return self.respond(413,{'error':'Webhook size rejected'})
+                    self.body_read=True
                     raw = self.rfile.read(size)
-                    event = payments.signed_event(raw,self.headers.get('Stripe-Signature',''))
+                    event = payments.signed_event(raw,self.headers.get('Stripe-Signature',''),payment_mode='stripe_live' if path.endswith('/live-webhook') else 'stripe_test')
                     return self.respond(200,payments.apply_event(store,event))
                 except StorageUnavailable:
                     return self.respond(503,{'error':'Storage unavailable; retry event'})
@@ -212,6 +230,7 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
                     return self.respond(413, {'error': 'Request size rejected'})
                 if self.headers.get('Content-Type', '').split(';')[0] != 'application/json':
                     return self.respond(415, {'error': 'JSON required'})
+                self.body_read=True
                 data = json.loads(self.rfile.read(size))
                 if not isinstance(data, dict):
                     raise ValueError('Object required')
@@ -326,7 +345,7 @@ def main():
     company_thread.start()
     def payment_worker():
         while not stop.is_set():
-            if payments.status()['ready']:
+            if payments.status()['ready'] or payments.live_key.startswith('sk_live_'):
                 try:
                     for order in store.company_rpc('pending_payments'):
                         if stop.is_set():
@@ -352,7 +371,7 @@ def main():
     scout_thread = threading.Thread(target=scout_worker, daemon=True) if scout_enabled else None
     if scout_thread:
         scout_thread.start()
-    print(f'Company X2 E18 sandbox listening on {args.host}:{server.server_port}', flush=True)
+    print(f'Company X2 E19 sandbox listening on {args.host}:{server.server_port}', flush=True)
     if not public:
         print(f'Local discovery admin token: {admin_token}', flush=True)
     try:

@@ -1,4 +1,4 @@
-"""Stripe test Checkout and raw-body webhook verification. Live keys rejected."""
+"""Separate test/live Checkout channels with verified payment evidence."""
 import hashlib
 import hmac
 import json
@@ -17,6 +17,13 @@ class Payments:
         self.key = env.get('STRIPE_SECRET_KEY','')
         self.webhook_secret = env.get('STRIPE_WEBHOOK_SECRET','')
         self.base = env.get('APP_PUBLIC_URL','').rstrip('/')
+        self.live_key=env.get('STRIPE_LIVE_SECRET_KEY','') or (self.key if self.key.startswith('sk_live_') else '')
+        self.live_secret=env.get('STRIPE_LIVE_WEBHOOK_SECRET','')
+        self.live_enabled=env.get('LIVE_PAYMENTS_ENABLED','false').lower()=='true'
+        self.sales_confirmed=env.get('LIVE_SALES_TERMS_CONFIRMED','false').lower()=='true'
+        self.terms_url=env.get('SALES_TERMS_URL','')
+        price=str(env.get('LIVE_PRICE_JPY',''))
+        self.live_price=int(price) if price.isdigit() and 50<=int(price)<=10000 else None
         self.opener = opener or urllib.request.build_opener(NoRedirect()).open
 
     def status(self):
@@ -25,12 +32,40 @@ class Payments:
                      and not parsed.username and not parsed.password and not parsed.query and not parsed.fragment)
         ready = bool(self.key.startswith('sk_test_') and self.webhook_secret.startswith('whsec_') and valid_url)
         return {'ready':ready,'mode':'stripe_test','live_enabled':False,
-                'reason':None if ready else 'Stripeテストキー、Webhook署名キー、APP_PUBLIC_URLが必要です。実決済キーは受付しません。'}
+                'reason':None if ready else 'Stripeテストキー、テストWebhook署名キー、APP_PUBLIC_URLが必要です。本番設定は別チャンネルで確認します。'}
 
-    def api(self, path, data=None, idempotency_key=None):
-        if not self.status()['ready']:
-            raise ValueError('Stripeテスト決済が未設定です')
-        headers = {'Authorization':'Bearer '+self.key}
+    def connection(self,mode):
+        if mode not in ('stripe_test','stripe_live'):raise ValueError('Unsupported payment mode')
+        live=mode=='stripe_live'
+        key=self.live_key if live else self.key
+        secret=self.live_secret if live else self.webhook_secret
+        parsed=urlparse(self.base)
+        valid=(parsed.scheme=='https' and bool(parsed.hostname) and parsed.path in ('','/')
+            and not parsed.username and not parsed.password and not parsed.query and not parsed.fragment)
+        if not key.startswith('sk_live_' if live else 'sk_test_') or not secret.startswith('whsec_') or not valid:
+            raise ValueError('Stripe channel is not configured')
+        return key,secret,live
+
+    def live_status(self,store=None):
+        reasons=[]
+        try:self.connection('stripe_live')
+        except ValueError:reasons.append('本番キー・本番Webhook署名キー・APP_PUBLIC_URLが必要です')
+        if not self.live_enabled:reasons.append('LIVE_PAYMENTS_ENABLED=true が必要です')
+        if self.live_price is None:reasons.append('LIVE_PRICE_JPY（50〜10000円）が必要です')
+        parsed=urlparse(self.terms_url)
+        if not self.sales_confirmed or not self.terms_url or parsed.scheme!='https' or parsed.netloc!=urlparse(self.base).netloc or parsed.username or parsed.password or parsed.fragment:
+            reasons.append('同じサイトの販売条件URLと LIVE_SALES_TERMS_CONFIRMED=true が必要です')
+        schema=False
+        if store is not None:
+            try:schema=store.company_rpc('live_ping')=={'live_schema_version':19}
+            except Exception:pass
+        if not schema:reasons.append('019_live_payments.sqlの適用が必要です')
+        return {'ready':not reasons,'mode':'stripe_live','price_jpy':self.live_price,'terms_url':self.terms_url,
+            'schema_ready':schema,'reasons':reasons}
+
+    def api(self, path, data=None, idempotency_key=None, payment_mode="stripe_test"):
+        key,secret,live=self.connection(payment_mode)
+        headers = {'Authorization':'Bearer '+key}
         if data is not None:
             headers['Content-Type'] = 'application/x-www-form-urlencoded'
         if idempotency_key:
@@ -43,7 +78,7 @@ class Payments:
             if len(raw) > 200_000:
                 raise ValueError('Provider response too large')
             result = json.loads(raw)
-            if not isinstance(result,dict) or result.get('livemode') is not False:
+            if not isinstance(result,dict) or result.get('livemode') is not live:
                 raise ValueError('Test provider evidence required')
             return result
         except Exception:
@@ -54,7 +89,9 @@ class Payments:
             raise ValueError('Unsupported checkout language')
         if return_path not in ('/company','/intake'):
             raise ValueError('決済の戻り先を確認してください')
-        if order['plan']['payment_mode'] != 'stripe_test':
+        mode=order['plan']['payment_mode']
+        if mode=='stripe_live' and not self.live_status(store)['ready']:raise ValueError('Live payments are not ready')
+        if mode not in ('stripe_test','stripe_live'):
             raise ValueError('無料注文に決済は不要です')
         if order.get('session_id'):
             return {'url':order['session_url'],'id':order['session_id']}
@@ -66,19 +103,18 @@ class Payments:
             'client_reference_id':order['id'],'metadata[cx2_order_id]':order['id'],
             'line_items[0][quantity]':1,'line_items[0][price_data][currency]':'jpy',
             'line_items[0][price_data][unit_amount]':order['plan']['price_jpy'],
-            'line_items[0][price_data][product_data][name]':'Company X2 TEST '+({'csv_exact_dedup':'CSV exact deduplication','csv_trim':'CSV whitespace trimming','csv_to_json':'CSV to JSON','csv_audit':'CSV data audit'}[order['plan']['service_key']] if locale=='en' else order['plan']['service_name'])
-        },idempotency_key='cx2-checkout-'+order['id'])
+            'line_items[0][price_data][product_data][name]':('Company X2 ' if mode=='stripe_live' else 'Company X2 TEST ')+({'csv_exact_dedup':'CSV exact deduplication','csv_trim':'CSV whitespace trimming','csv_to_json':'CSV to JSON','csv_audit':'CSV data audit'}[order['plan']['service_key']] if locale=='en' else order['plan']['service_name'])
+        },idempotency_key='cx2-checkout-'+order['id'],**({'payment_mode':mode} if mode=='stripe_live' else {}))
         parsed = urlparse(result.get('url',''))
-        if (not re.fullmatch(r'cs_test_[A-Za-z0-9]+',result.get('id','')) or parsed.scheme != 'https'
+        if (not re.fullmatch(r'cs_live_[A-Za-z0-9]+' if mode=='stripe_live' else r'cs_test_[A-Za-z0-9]+',result.get('id','')) or parsed.scheme != 'https'
                 or parsed.netloc != 'checkout.stripe.com' or parsed.username or parsed.password):
             raise ValueError('Checkout response rejected')
         store.company_rpc('session', {'id':order['id'],'token_hash':token_hash,
                                      'session_id':result['id'],'session_url':result['url']})
         return {'url':result['url'],'id':result['id']}
 
-    def signed_event(self, raw, header, now=None):
-        if not self.status()['ready']:
-            raise ValueError('Webhookが未設定です')
+    def signed_event(self, raw, header, now=None, payment_mode="stripe_test"):
+        key,secret,live=self.connection(payment_mode)
         parts = {}
         for piece in header.split(','):
             key, separator, value = piece.partition('=')
@@ -90,11 +126,11 @@ class Payments:
             timestamp = int(parts['t'][0])
             if abs((time.time() if now is None else now)-timestamp) > 300:
                 raise ValueError('expired')
-            digest = hmac.new(self.webhook_secret.encode(),str(timestamp).encode()+b'.'+raw,hashlib.sha256).hexdigest()
+            digest = hmac.new(secret.encode(),str(timestamp).encode()+b'.'+raw,hashlib.sha256).hexdigest()
             if not any(re.fullmatch('[a-f0-9]{64}',value) and hmac.compare_digest(digest,value) for value in parts.get('v1',[])):
                 raise ValueError('signature')
             event = json.loads(raw)
-            if not isinstance(event,dict) or event.get('livemode') is not False or not re.fullmatch(r'evt_[A-Za-z0-9]+',event.get('id','')):
+            if not isinstance(event,dict) or event.get('livemode') is not live or not re.fullmatch(r'evt_[A-Za-z0-9]+',event.get('id','')):
                 raise ValueError('event')
             return event
         except (ValueError,TypeError,UnicodeError):
@@ -107,14 +143,17 @@ class Payments:
         if not isinstance(data,dict) or not isinstance(data.get('object'),dict):
             raise ValueError('Invalid checkout event')
         session = data['object']
+        if type(event.get('livemode')) is not bool or session.get('livemode') is not event['livemode']:raise ValueError('Webhook channel mismatch')
         if session.get('payment_status') != 'paid':
             return {'received':True,'ignored':True}
         return self.reconcile_session(store,session,event['id'])
 
     def reconcile_session(self, store, session, event_id):
-        if (session.get('livemode') is not False or session.get('mode') != 'payment'
+        live=session.get('livemode') is True
+        if type(session.get('livemode')) is not bool:raise ValueError('Payment mode evidence required')
+        if (session.get('livemode') is not live or session.get('mode') != 'payment'
                 or session.get('status') != 'complete' or session.get('payment_status') != 'paid'
-                or not re.fullmatch(r'cs_test_[A-Za-z0-9]+', session.get('id',''))
+                or not re.fullmatch(r'cs_live_[A-Za-z0-9]+' if live else r'cs_test_[A-Za-z0-9]+', session.get('id',''))
                 or type(session.get('amount_total')) is not int):
             raise ValueError('決済完了の証拠が不足しています')
         metadata=session.get('metadata')
@@ -125,7 +164,7 @@ class Payments:
             return {'received':True,'ignored':True}
         evidence = {'id':order,'session_id':session['id'],'event_id':event_id,
             'amount':session['amount_total'],'currency':session.get('currency'),
-            'livemode':False,'payment_status':'paid'}
+            'livemode':live,'payment_status':'paid'}
         evidence['fingerprint'] = hashlib.sha256(json.dumps(evidence,sort_keys=True).encode()).hexdigest()
         store.company_rpc('payment', evidence)
         return {'received':True,'verified':True}
@@ -133,7 +172,8 @@ class Payments:
     def reconcile(self, store, order):
         if not order.get('session_id'):
             raise ValueError('Checkoutがまだ作成されていません')
-        session = self.api('checkout/sessions/'+order['session_id'])
+        mode='stripe_live' if order['session_id'].startswith('cs_live_') else 'stripe_test'
+        session = self.api('checkout/sessions/'+order['session_id'],**({'payment_mode':mode} if mode=='stripe_live' else {}))
         if session.get('payment_status') != 'paid':
             return {'payment_status':'unpaid'}
         self.reconcile_session(store,session,'reconcile_'+session['id'])
