@@ -47,7 +47,9 @@ class Payments:
         return key,secret,live
 
     def live_status(self,store=None):
-        reasons=[]
+        # The operator requires zero liability beyond refunds. Contract wording
+        # cannot establish that guarantee; configuration alone must not open sales.
+        reasons=['返金以外の責任が生じないことを受注の絶対条件としているため、本番受注は停止中です']
         try:self.connection('stripe_live')
         except ValueError:reasons.append('本番キー・本番Webhook署名キー・APP_PUBLIC_URLが必要です')
         if not self.live_enabled:reasons.append('LIVE_PAYMENTS_ENABLED=true が必要です')
