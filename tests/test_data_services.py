@@ -110,29 +110,23 @@ class DataServiceTests(unittest.TestCase):
                 with request('/api/services') as response:
                     self.assertEqual(len(json.load(response)['items']),4)
                 for index, service in enumerate(('csv_exact_dedup','csv_trim','csv_to_json','csv_audit')):
-                    with request('/api/orders',{'csv':'a\n001\n001\n','service_key':service,
-                                 'request_key':str(index)*32,'terms_accepted':True}) as response:
-                        order = json.load(response)['id']
+                    with self.assertRaises(urllib.error.HTTPError) as retired:
+                        request('/api/orders',{'csv':'a\n001\n001\n','service_key':service,
+                                 'request_key':str(index)*32,'terms_accepted':True})
+                    self.assertEqual(retired.exception.code,410)
+                    order=store.submit('a\n001\n001\n',str(index)*32,token,service)
                     process_one(store)
-                    with request('/api/orders/'+order) as response:
-                        saved = json.load(response)
-                    self.assertNotIn('content',saved['result']['artifact'])
-                    self.assertNotIn('csv',saved['result'])
-                    with request('/api/orders/'+order+'/download') as response:
-                        raw = response.read()
-                        self.assertIn('attachment',response.headers['Content-Disposition'])
-                        self.assertTrue(response.headers['Content-Type'].startswith('application/json' if service in ('csv_to_json','csv_audit') else 'text/csv'))
-                    self.assertEqual(hashlib.sha256(raw).hexdigest(),saved['result']['download_sha256'])
-                    if service in ('csv_to_json','csv_audit'):
-                        json.loads(raw)
-                        self.assertFalse(raw.startswith(b'\xef\xbb\xbf'))
+                    for path in ('/api/orders/'+order,'/api/orders/'+order+'/download'):
+                        with self.assertRaises(urllib.error.HTTPError) as unchecked:
+                            request(path)
+                        self.assertEqual(unchecked.exception.code,410)
                     with self.assertRaises(urllib.error.HTTPError) as err:
                         request('/api/orders/'+order+'/download',owner='wrong')
                     self.assertEqual(err.exception.code,404)
                 with self.assertRaises(urllib.error.HTTPError) as invalid:
                     request('/api/orders',{'csv':'a\n1\n','service_key':'run_code',
                                           'request_key':'z'*32,'terms_accepted':True})
-                self.assertEqual(invalid.exception.code,400)
+                self.assertEqual(invalid.exception.code,410)
             finally:
                 server.shutdown()
                 server.server_close()

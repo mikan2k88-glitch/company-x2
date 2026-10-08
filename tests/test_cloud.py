@@ -117,8 +117,9 @@ class CloudTests(unittest.TestCase):
                 headers.update({'Authorization':'Basic '+base64.b64encode(b'demo:test-password').decode(),
                     'X-Order-Token':'a'*32, 'Content-Type':'application/json', 'Origin':'https://company-x2.onrender.com'})
                 body = json.dumps({'csv':'a\n1\n', 'request_key':'b'*32, 'terms_accepted':True}).encode()
-                with urllib.request.urlopen(urllib.request.Request(base+'/api/orders',data=body,headers=headers)) as response:
-                    self.assertEqual(response.status, 202)
+                with self.assertRaises(urllib.error.HTTPError) as retired:
+                    urllib.request.urlopen(urllib.request.Request(base+'/api/orders',data=body,headers=headers))
+                self.assertEqual(retired.exception.code,410)
             finally:
                 server.shutdown()
                 server.server_close()

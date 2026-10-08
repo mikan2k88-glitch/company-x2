@@ -47,11 +47,22 @@ def get_route(handler, path, store, ai, payments, scout_enabled):
             handler.respond(404,{'error':'Not found'})
             return True
         order = store.company_rpc('get',{'id':parts[3],'token_hash':store.digest(handler.token())})
+        if order:
+            order['delivery_allowed'] = False
+            if order['status'] in ('ready','delivered'):
+                from .delivery_safety import require_delivery
+                try:
+                    require_delivery(order)
+                    order['delivery_allowed'] = True
+                except ValueError:
+                    order['delivery_error'] = '安全検査が未完了または不一致のため納品を保留しています。新しい計画が必要です。'
         if not order:
             handler.respond(404,{'error':'Transaction not found'})
         elif len(parts)==5:
             if order['status'] not in ('ready','delivered') or order.get('refund',{}).get('state','none') != 'none':
                 handler.respond(409,{'error':'Artifact unavailable'})
+            elif not order['delivery_allowed']:
+                handler.respond(409,{'error':order['delivery_error']})
             else:
                 service = order['plan']['service_key']
                 artifact = make_artifact(order['result']['artifact']['content'],service)
@@ -118,10 +129,14 @@ def post_route(handler, path, data, store, ai, payments):
         if not order:
             handler.respond(404,{'error':'Transaction not found'})
         elif path.endswith('/checkout'):
+            from .delivery_safety import require_plan
+            require_plan(order['plan'])
             handler.respond(200,payments.checkout(store,order,token_hash,data.get('return_path','/company'),data.get('locale','auto')))
         elif path.endswith('/reconcile'):
             handler.respond(200,payments.reconcile(store,order))
         else:
+            from .delivery_safety import require_delivery
+            require_delivery(order)
             store.company_rpc('receipt',{'id':order['id'],'token_hash':token_hash,
                                        'download_sha256':data.get('download_sha256')})
             public_intake.delivered(store,order['id'],handler.token())

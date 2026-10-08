@@ -66,19 +66,15 @@ class PlannerTests(unittest.TestCase):
                                  {'terms_accepted':False}, {'request_key':None}):
                     with self.assertRaises(urllib.error.HTTPError) as error:
                         call('/api/plans/run',{**run,**modified})
-                    self.assertEqual(error.exception.code,400)
+                    self.assertEqual(error.exception.code,410)
                 with store.connect() as connection:
                     self.assertEqual(connection.execute('select count(*) from orders').fetchone()[0],0)
-                order=call('/api/plans/run',run)['id']
-                self.assertEqual(call('/api/plans/run',run)['id'],order)
-                with self.assertRaises(urllib.error.HTTPError):
-                    call('/api/plans/run',run,token='w'*32)
+                with self.assertRaises(urllib.error.HTTPError) as retired:
+                    call('/api/plans/run',run)
+                self.assertEqual(retired.exception.code,410)
                 process_one(Store(db))
-                result=call('/api/orders/'+order)
-                self.assertEqual(result['status'],'ready')
-                self.assertEqual(result['service_key'],'csv_to_json')
-                self.assertEqual(result['revenue_jpy'],0)
-                self.assertEqual(json.loads(store.get(order,'t'*32)['result']['artifact']['content']),[{'a':'001'}])
+                with store.connect() as connection:
+                    self.assertEqual(connection.execute('select count(*) from orders').fetchone()[0],0)
             finally:
                 server.shutdown();server.server_close();thread.join()
 

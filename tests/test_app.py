@@ -89,19 +89,20 @@ class AppTests(unittest.TestCase):
         try:
             with request('/') as response:
                 self.assertIn(b'Company X2', response.read())
-            with request('/api/orders', {'csv': 'a\n1\n1\n', 'request_key': KEY, 'terms_accepted': True}) as response:
-                self.assertEqual(response.status, 202)
-                order = json.load(response)['id']
+            with self.assertRaises(urllib.error.HTTPError) as retired:
+                request('/api/orders', {'csv': 'a\n1\n1\n', 'request_key': KEY, 'terms_accepted': True})
+            self.assertEqual(retired.exception.code,410)
+            order = self.store.submit('a\n1\n1\n',KEY,TOKEN)
             with self.assertRaises(urllib.error.HTTPError) as missing:
                 request('/api/orders/' + order, token='wrong')
             self.assertEqual(missing.exception.code, 404)
             with self.assertRaises(urllib.error.HTTPError) as early:
                 request('/api/orders/' + order + '/download')
-            self.assertEqual(early.exception.code, 409)
+            self.assertEqual(early.exception.code, 410)
             process_one(self.store)
-            with request('/api/orders/' + order + '/download') as response:
-                self.assertEqual(response.read().decode('utf-8-sig'), 'a\r\n1\r\n')
-                self.assertIn('attachment', response.headers['Content-Disposition'])
+            with self.assertRaises(urllib.error.HTTPError) as unchecked:
+                request('/api/orders/' + order + '/download')
+            self.assertEqual(unchecked.exception.code,410)
             with self.assertRaises(urllib.error.HTTPError) as forbidden:
                 request('/api/orders', {'csv': 'a'}, headers={'Origin': 'https://evil.example'})
             self.assertEqual(forbidden.exception.code, 403)

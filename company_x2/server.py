@@ -179,24 +179,7 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
                 order = store.get(parts[2], self.token())
                 if not order:
                     return self.respond(404, {'error': 'Order not found'})
-                if len(parts) == 4:
-                    if parts[3] != 'download' or order['status'] != 'ready':
-                        return self.respond(409, {'error': 'Artifact unavailable'})
-                    service_key = order.get('service_key', 'csv_exact_dedup')
-                    if 'artifact' in order['result']:
-                        artifact = order['result']['artifact']
-                        # Metadata comes from a fixed service catalog, never raw HTTP inputs.
-                        from .data_services import make_artifact
-                        trusted = make_artifact(artifact['content'], service_key)
-                        encoding = 'utf-8-sig' if SERVICES[service_key]['format'] == 'csv' else 'utf-8'
-                        return self.respond(200, trusted['content'].encode(encoding), trusted['content_type'],
-                                            filename='company-x2-result.csv' if service_key == 'csv_exact_dedup' else trusted['filename'])
-                    return self.respond(200, order['result']['csv'].encode('utf-8-sig'), 'text/csv; charset=utf-8')
-                if order['result']:
-                    order['result'] = {k: v for k, v in order['result'].items() if k != 'csv'}
-                    if 'artifact' in order['result']:
-                        order['result']['artifact'] = {k: v for k, v in order['result']['artifact'].items() if k != 'content'}
-                return self.respond(200, order)
+                return self.respond(410, {'error': '旧検証経路は停止しました。安全確認のある /intake を使用してください。'})
             return self.respond(404, {'error': 'Not found'})
 
         def do_POST(self):
@@ -249,34 +232,15 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
                     return self.respond(200,{'access':grant,'expires_at':expires,'mode':'public_free','max_bytes':public_intake.MAX_BYTES,'max_rows':public_intake.MAX_ROWS})
                 if company_post(self,path,data,store,ai,payments):
                     return
-                if path in ('/api/plans', '/api/plans/run'):
+                if path in ('/api/orders', '/api/plans/run'):
+                    return self.respond(410, {'error': '旧検証経路は停止しました。安全確認のある /intake を使用してください。'})
+                if path == '/api/plans':
+                    from .delivery_safety import inspect_input
+                    inspect_input(data.get('csv'))
                     plan = plan_request(data.get('request'), data.get('csv'))
                     if plan['service_key'] != 'csv_exact_dedup' and not store.services_ready():
                         raise ValueError('004_data_services.sqlの適用と接続設定を確認してください')
-                    if path == '/api/plans':
-                        return self.respond(200, {'plan': plan, 'submitted': False})
-                    if data.get('terms_accepted') is not True:
-                        raise ValueError('作業計画と無料検証条件への同意が必要です')
-                    digest = data.get('plan_sha256')
-                    if (not isinstance(digest, str) or len(digest) != 64
-                            or any(c not in '0123456789abcdef' for c in digest)
-                            or not secrets.compare_digest(digest, plan['plan_sha256'])):
-                        raise ValueError('依頼か入力が変更されました。作業計画を作り直してください')
-                    key = data.get('request_key')
-                    if not isinstance(key, str):
-                        raise ValueError('Request key required')
-                    order_id = store.submit(data['csv'], key, self.token(), plan['service_key'])
-                    return self.respond(202, {'id': order_id, 'service_key': plan['service_key'],
-                        'plan_sha256': plan['plan_sha256'], 'mode': 'sandbox', 'revenue_jpy': 0})
-                if path == '/api/orders':
-                    if data.get('terms_accepted') is not True:
-                        raise ValueError('Sandbox service terms must be accepted')
-                    text, key, token = data.get('csv'), data.get('request_key'), self.token()
-                    if not isinstance(text, str) or not isinstance(key, str) or len(text.encode()) > MAX_BYTES:
-                        raise ValueError('CSV input limit exceeded or invalid request')
-                    service_key = require_service(data.get('service_key', 'csv_exact_dedup'))
-                    order_id = store.submit(text, key, token, service_key)
-                    return self.respond(202, {'id': order_id, 'mode': 'sandbox', 'revenue_jpy': 0})
+                    return self.respond(200, {'plan': plan, 'submitted': False})
                 if path == '/api/opportunities':
                     if not secrets.compare_digest(self.headers.get('X-Admin-Token', self.token()), admin_token):
                         return self.respond(401, {'error': 'Admin token required'})
@@ -394,3 +358,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

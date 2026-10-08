@@ -30,7 +30,10 @@ def quote(service, text, mode='sandbox',live_price=None,terms_url=None,risk_cont
         raise ValueError('対応サービスと検証モードを指定してください')
     if mode=='stripe_live' and (type(live_price) is not int or not 50<=live_price<=10000 or not isinstance(terms_url,str) or not terms_url.startswith('https://')):
         raise ValueError('Live pricing and sales terms are required')
+    from .delivery_safety import inspect_input
+    input_safety = inspect_input(text)
     plan = plan_request(REQUESTS[service][0], text)
+    plan['input_safety'] = input_safety
     from .intake_risk import assess, require_declared_scope
     risk = assess(risk_context) if risk_context is None else require_declared_scope(risk_context)
     if mode == 'stripe_live':
@@ -54,6 +57,8 @@ def validate_creation(data, token,live_price=None,terms_url=None):
     if data.get('terms_accepted') is not True:
         raise ValueError('処理範囲・料金・検証条件への同意が必要です')
     plan = quote(data.get('service_key'), data.get('csv'), data.get('payment_mode', 'sandbox'),live_price,terms_url,data.get('risk_context'))
+    from .delivery_safety import require_plan
+    require_plan(plan)
     if data.get('plan_sha256') != plan['plan_sha256']:
         raise ValueError('計画か入力が変わりました。見積もりを作り直してください')
     source = data.get('source_url') or ''
@@ -70,9 +75,16 @@ def process_transaction(store):
     if not job:
         return False
     try:
+        from .delivery_safety import require_plan, inspect_input, inspect_artifact, VERSION
+        require_plan(job['plan'])
+        input_safety = inspect_input(job['input'])
+        if input_safety != job['plan']['input_safety']:
+            raise ValueError('Input safety evidence changed')
         service = job['plan']['service_key']
         result = produce(job['input'], service)
         verify(job['input'], service, result)
+        result['delivery_safety'] = {**input_safety, 'version': VERSION,
+            'artifact_sha256': inspect_artifact(result['artifact']['content'], service)}
         encoding = 'utf-8-sig' if SERVICES[service]['format'] == 'csv' else 'utf-8'
         result['download_sha256'] = hashlib.sha256(result['artifact']['content'].encode(encoding)).hexdigest()
         store.company_rpc('finish', {'id': job['id'], 'lease': job['lease'], 'result': result})
