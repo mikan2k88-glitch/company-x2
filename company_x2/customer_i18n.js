@@ -72,8 +72,17 @@ const messages={
 '発注募集中という表示や実売上の表示はありません。自動応募はまだ稼働していません。':'This is a test service. Automatic bidding is not active.',
 '決済表示も選択した言語で開きます。既存の決済画面は作成時の言語を保持します。':'New checkout sessions use the selected language. Existing sessions keep their original language.'
 };
+const publicErrors={
+'Public CSV limit: 50 KB and 1,000 rows':'公開入力は50KB・1,000行までです',
+'Public intake supports free verification only':'公開受付は無料検証のみです',
+'Daily public start limit reached; retry after 00:00 UTC':'本日の公開開始上限です。日本時間9時以降に再試行してください',
+'Daily public plan limit reached; retry after 00:00 UTC':'本日の計画作成上限です。日本時間9時以降に再試行してください',
+'Daily public order limit reached; retry after 00:00 UTC':'本日の公開受付上限です。日本時間9時以降に再試行してください',
+'Public rate limit reached; retry in one minute':'公開APIが混み合っています。1分後に再試行してください',
+'Public intake temporarily unavailable; contact the operator':'公開受付を一時停止しています。運営者へご連絡ください'
+};
 const keys=Object.keys(messages).sort((a,b)=>b.length-a.length);
-function translate(text,lang){if(lang!=='en')return text;for(const key of keys)text=text.split(key).join(messages[key]);return text}
+function translate(text,lang){if(lang!=='en')return publicErrors[text]||text;for(const key of keys)text=text.split(key).join(messages[key]);return text}
 if(typeof module!=='undefined')module.exports={translate,messages};
 if(typeof document==='undefined')return;
 let lang='ja';try{const requested=new URLSearchParams(location.search).get('lang');lang=['ja','en'].includes(requested)?requested:sessionStorage.getItem('cx2-language')||((navigator.language||'').startsWith('ja')?'ja':'en')}catch{}
