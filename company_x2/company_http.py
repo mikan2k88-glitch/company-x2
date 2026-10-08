@@ -50,7 +50,7 @@ def get_route(handler, path, store, ai, payments, scout_enabled):
         if not order:
             handler.respond(404,{'error':'Transaction not found'})
         elif len(parts)==5:
-            if order['status'] not in ('ready','delivered'):
+            if order['status'] not in ('ready','delivered') or order.get('refund',{}).get('state','none') != 'none':
                 handler.respond(409,{'error':'Artifact unavailable'})
             else:
                 service = order['plan']['service_key']

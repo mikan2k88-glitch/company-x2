@@ -1,6 +1,14 @@
 /* Curated UI translations only. Never translate customer CSV, hashes or identifiers. */
 (() => {
 const messages={
+'返金対象を確認':'Refund eligibility confirmed',
+'返金処理中':'Preparing refund',
+'返金受付中':'Refund pending',
+'返金完了':'Refund succeeded',
+'返金失敗・運営確認中':'Refund failed; operator review required',
+'返金取消・運営確認中':'Refund canceled; operator review required',
+'返金に追加対応が必要':'Refund requires additional action',
+'返金状況を運営側で確認中':'Refund under operator review',
 '本番決済（実際に支払います）':'Live payment (real charge)',
 '本番決済 JPY ':'Live payment JPY ',
 '（実際に支払います）':' (real charge)',
