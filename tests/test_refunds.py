@@ -28,9 +28,10 @@ class RefundTests(unittest.TestCase):
     def create(self,mode='stripe_test',key='k'*32):
         price=300 if mode=='stripe_live' else None
         terms=ENV['SALES_TERMS_URL'] if price else None
-        plan=quote('csv_to_json','id\n001\n',mode,price,terms)
+        risk=dict(sensitive_data='no',critical_use='no',extra_liability='no')
+        plan=quote('csv_to_json','id\n001\n',mode,price,terms,risk)
         payload=validate_creation({'csv':'id\n001\n','service_key':'csv_to_json','payment_mode':mode,
-            'request_key':key,'terms_accepted':True,'plan_sha256':plan['plan_sha256']},'t'*32,price,terms)
+            'risk_context':risk,'request_key':key,'terms_accepted':True,'plan_sha256':plan['plan_sha256']},'t'*32,price,terms)
         order=self.store.company_rpc('create',payload)
         session='cs_live_fixture' if price else 'cs_test_fixture'
         self.store.company_rpc('session',{'id':order,'token_hash':payload['token_hash'],'session_id':session,'session_url':'https://checkout.stripe.com/c/pay/test'})

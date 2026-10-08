@@ -93,11 +93,15 @@ def post_route(handler, path, data, store, ai, payments):
             raise ValueError('依頼文を設定済みのAI提供元へ送信することへの同意が必要です')
         handler.respond(200,ai.analyze(store,data.get('request'),handler.token()))
     elif path == '/api/company/quote':
+        from .intake_risk import require_declared_scope
+        require_declared_scope(data.get('risk_context'))
         if getattr(handler,'public_customer',False):public_intake.reserve_quote(store,data)
         mode=data.get('payment_mode','sandbox')
         if mode=='stripe_live' and (not getattr(handler,'live_customer',False) or not payments.live_status(store)['ready']):raise ValueError('Live payments are not ready')
-        handler.respond(200,{'plan':quote(data.get('service_key'),data.get('csv'),mode,payments.live_price,payments.terms_url)})
+        handler.respond(200,{'plan':quote(data.get('service_key'),data.get('csv'),mode,payments.live_price,payments.terms_url,data.get('risk_context'))})
     elif path == '/api/company/transactions':
+        from .intake_risk import require_declared_scope
+        require_declared_scope(data.get('risk_context'))
         if getattr(handler,'public_customer',False):
             order=public_intake.create(store,data,handler.token())
             handler.respond(202,{'id':order,'mode':'sandbox','revenue_jpy':0})
