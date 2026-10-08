@@ -58,9 +58,10 @@ class PostgresTests(unittest.TestCase):
 
     def company_create(self, mode='sandbox', key='company-request-key'):
         from company_x2.company import quote,validate_creation
-        plan=quote('csv_to_json','id\n001\n',mode)
+        risk=dict(sensitive_data='no',critical_use='no',extra_liability='no')
+        plan=quote('csv_to_json','id\n001\n',mode,risk_context=risk)
         payload=validate_creation({'csv':'id\n001\n','service_key':'csv_to_json','payment_mode':mode,
-            'terms_accepted':True,'request_key':key,'plan_sha256':plan['plan_sha256']},'t'*32)
+            'risk_context':risk,'terms_accepted':True,'request_key':key,'plan_sha256':plan['plan_sha256']},'t'*32)
         return self.company_rpc('create',payload),payload
 
     def refund_paid(self):
