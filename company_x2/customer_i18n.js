@@ -1,8 +1,17 @@
 /* Curated UI translations only. Never translate customer CSV, hashes or identifiers. */
 (() => {
 const messages={
+'E18 / 公開無料検証と招待リンクの受付窓口です。Stripeテスト100円は招待受付専用です。実際の支払いは発生しません。':'E18 / Public free verification and invitation intake. JPY 100 Stripe test checkout is available only with an invitation. No real charge.',
+'公開入力は50KB・1,000行まで。JSONでは値を文字列として保持します。':'Public input: up to 50 KB and 1,000 rows. JSON values remain strings.',
+'無料検証を開始':'Start free verification',
+'無料検証を開始するか、招待リンクからアクセスしてください。':'Start free verification or open your invitation link.',
+'アクセス期限が切れました。無料検証を開始し直すか、新しい招待リンクを使ってください。':'Access expired. Start free verification again or use a new invitation link.',
+'公開受付で無料検証を開始する（招待リンクも利用できます）':'Start free verification through public intake (invitation links also work)',
+'公開受付は50KB・1,000行まで、同じ利用トークンで1日2件、全体で1日10件。無料検証のみで、実際の支払いは発生しません。':'Public intake: up to 50 KB and 1,000 rows, two orders per owner token per day and ten in total per day. Free verification only. No real charge.',
+'招待リンクなしで無料検証できます。公開受付は50KB・1,000行まで、同じ利用トークンで1日2件、全体で1日10件です。上限は日本時間9時に更新します。':'You can start free verification without an invitation. Public intake: 50 KB, 1,000 rows, two orders per owner token and ten total per day. Limits reset at 00:00 UTC (09:00 Japan time).',
+
 'CSVの依頼受付':'CSV service intake',
-'E17 / 期限付き受付リンクを受け取った利用者向けの検証窓口です。無料検証またはStripeテスト100円で受付します。実際の支払いは発生しません。':'E17 / Test intake for customers with an invitation link. Free verification or a JPY 100 Stripe test payment. No real charge.',
+'E18 / 期限付き受付リンクを受け取った利用者向けの検証窓口です。無料検証またはStripeテスト100円で受付します。実際の支払いは発生しません。':'E18 / Test intake for customers with an invitation link. Free verification or a JPY 100 Stripe test payment. No real charge.',
 '1. サービスと入力':'1. Service and input','2. 制作・受け取り':'2. Production and delivery',
 '受付条件を確認しています…':'Checking intake availability…','処理':'Service',
 'CSV重複除去':'CSV exact deduplication','CSV空白整形':'CSV whitespace trimming','CSVデータ検査':'CSV data audit',

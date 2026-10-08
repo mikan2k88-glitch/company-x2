@@ -9,12 +9,15 @@ from .cloud_scout import run as cloud_run
 from .agent_scout import state as agent_state, register as agent_register, summary as agent_summary
 from .sales import assess as sales_assess, proposal as sales_proposal
 from .intake_access import issue as issue_intake
+from . import public_intake
 from datetime import datetime, timezone
 from urllib.parse import urlencode
 
 
 def get_route(handler, path, store, ai, payments, scout_enabled):
-    if path == '/api/company/sales':
+    if path == '/api/company/public-intake':
+        handler.respond(200,public_intake.summary(store))
+    elif path == '/api/company/sales':
         handler.respond(200,sales_assess((agent_state(store).get('items',[])+snapshot(store,enabled=scout_enabled).get('items',[]))[:30]))
     elif path == '/api/company/agent-scout/status':
         handler.respond(200,agent_summary(store))
@@ -31,7 +34,10 @@ def get_route(handler, path, store, ai, payments, scout_enabled):
     elif path == '/api/intake/config':
         ready = company_status(store,ai,payments)
         handler.respond(200,{'database_ready':ready['database_ready'],
-            'database_error':ready['database_error'], 'payments_ready':ready['payments']['ready']})
+            'database_error':ready['database_error'], 'payments_ready':ready['payments']['ready'] and not getattr(handler,'public_customer',False),
+            'public_free':getattr(handler,'public_customer',False),
+            'max_bytes':public_intake.MAX_BYTES if getattr(handler,'public_customer',False) else 1000000,
+            'max_rows':public_intake.MAX_ROWS if getattr(handler,'public_customer',False) else 10000})
     elif path.startswith('/api/company/transactions/'):
         parts = path.strip('/').split('/')
         if len(parts) not in (4,5) or (len(parts)==5 and parts[4]!='download'):
@@ -82,8 +88,13 @@ def post_route(handler, path, data, store, ai, payments):
             raise ValueError('依頼文を設定済みのAI提供元へ送信することへの同意が必要です')
         handler.respond(200,ai.analyze(store,data.get('request'),handler.token()))
     elif path == '/api/company/quote':
+        if getattr(handler,'public_customer',False):public_intake.reserve_quote(store,data)
         handler.respond(200,{'plan':quote(data.get('service_key'),data.get('csv'),data.get('payment_mode','sandbox'))})
     elif path == '/api/company/transactions':
+        if getattr(handler,'public_customer',False):
+            order=public_intake.create(store,data,handler.token())
+            handler.respond(202,{'id':order,'mode':'sandbox','revenue_jpy':0})
+            return True
         payload = validate_creation(data,handler.token())
         if payload['plan']['payment_mode']=='stripe_test' and not payments.status()['ready']:
             raise ValueError('Stripeテスト決済が未設定です')
@@ -101,6 +112,7 @@ def post_route(handler, path, data, store, ai, payments):
         else:
             store.company_rpc('receipt',{'id':order['id'],'token_hash':token_hash,
                                        'download_sha256':data.get('download_sha256')})
+            public_intake.delivered(store,order['id'],handler.token())
             handler.respond(200,{'received':True})
     else:
         return False

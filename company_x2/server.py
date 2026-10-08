@@ -16,6 +16,8 @@ from .settings import build_store
 from .supabase_store import StorageUnavailable
 from .github_source import GitHubUnavailable
 from .intake_access import valid as valid_intake, permits as intake_permits
+from .intake_access import public_issue, public_valid, public_permits
+from . import public_intake
 from .worker import process_one
 from .public_scout import scan_once, snapshot
 from .data_services import SERVICES, require_service
@@ -61,6 +63,18 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
 
         def access_allowed(self):
             path=urlparse(self.path).path
+            self.public_customer=False
+            grant=self.headers.get('X-Intake-Access','')
+            if public_valid(grant,access_password or admin_token,self.headers.get('X-Order-Token','')):
+                if not public_permits(self.command,path):
+                    self.respond(403,{'error':'Public intake supports free verification only'})
+                    return False
+                try:public_intake.check_rate()
+                except public_intake.LimitReached as exc:
+                    self.respond(429,{'error':str(exc)})
+                    return False
+                self.public_customer=True
+                return True
             if intake_permits(self.command,path) and valid_intake(self.headers.get('X-Intake-Access',''),access_password or admin_token):
                 return True
             if intake_permits(self.command,path) and self.headers.get('X-Intake-Access'):
@@ -108,7 +122,7 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
             if path == '/api/health':
                 if not store.ping():
                     return self.respond(503, {'status': 'storage_unavailable'})
-                return self.respond(200, {'status': 'ok', 'endpoint': 'E17', 'mode': 'sandbox',
+                return self.respond(200, {'status': 'ok', 'endpoint': 'E18', 'mode': 'sandbox',
                     'storage': 'supabase' if hasattr(store, 'rpc') else 'sqlite',
                     'payments_enabled': False, 'outreach_enabled': False, 'ai_connected': False})
             if path == '/services':
@@ -187,11 +201,14 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
                 except Exception:
                     logging.error('Webhook processing unavailable')
                     return self.respond(500,{'error':'Webhook processing unavailable; retry event'})
-            if not self.access_allowed():
+            public_endpoint=path in ('/api/public/start','/api/public/visit')
+            if not public_endpoint and not self.access_allowed():
                 return
             try:
+                if public_endpoint:public_intake.check_rate()
                 size = int(self.headers.get('Content-Length', '0'))
-                if not 0 < size <= MAX_BYTES * 6 + 4096:
+                maximum=1024 if public_endpoint else (public_intake.MAX_BYTES*6+4096 if getattr(self,'public_customer',False) else MAX_BYTES*6+4096)
+                if not 0 < size <= maximum:
                     return self.respond(413, {'error': 'Request size rejected'})
                 if self.headers.get('Content-Type', '').split(';')[0] != 'application/json':
                     return self.respond(415, {'error': 'JSON required'})
@@ -199,6 +216,16 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
                 if not isinstance(data, dict):
                     raise ValueError('Object required')
                 path = urlparse(self.path).path
+                if public_endpoint:
+                    if path.endswith('/visit'):
+                        public_intake.visit(store,data.get('request_key'))
+                        return self.respond(200,{'recorded':True})
+                    if store.company_rpc('ping')!={'schema_version':9}:
+                        return self.respond(503,{'error':'Public intake temporarily unavailable; contact the operator'})
+                    owner=self.headers.get('X-Order-Token','')
+                    public_intake.start(store,owner)
+                    grant,expires=public_issue(access_password or admin_token,owner)
+                    return self.respond(200,{'access':grant,'expires_at':expires,'mode':'public_free','max_bytes':public_intake.MAX_BYTES,'max_rows':public_intake.MAX_ROWS})
                 if company_post(self,path,data,store,ai,payments):
                     return
                 if path in ('/api/plans', '/api/plans/run'):
@@ -242,6 +269,8 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
                                           'diagnostic':exc.diagnostic()})
             except StorageUnavailable:
                 return self.respond(503, {'error': 'Storage unavailable; retry with the same request key'})
+            except public_intake.LimitReached as exc:
+                return self.respond(429,{'error':str(exc)})
             except (ValueError, UnicodeError, TimeoutError) as exc:
                 return self.respond(400, {'error': str(exc)[:200]})
             except Exception:
@@ -323,7 +352,7 @@ def main():
     scout_thread = threading.Thread(target=scout_worker, daemon=True) if scout_enabled else None
     if scout_thread:
         scout_thread.start()
-    print(f'Company X2 E17 sandbox listening on {args.host}:{server.server_port}', flush=True)
+    print(f'Company X2 E18 sandbox listening on {args.host}:{server.server_port}', flush=True)
     if not public:
         print(f'Local discovery admin token: {admin_token}', flush=True)
     try:
