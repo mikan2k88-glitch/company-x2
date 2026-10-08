@@ -49,7 +49,9 @@ class Payments:
         except Exception:
             raise ValueError('Stripeの応答を確認できませんでした。同じ注文で再確認してください') from None
 
-    def checkout(self, store, order, token_hash, return_path='/company'):
+    def checkout(self, store, order, token_hash, return_path='/company', locale='auto'):
+        if locale not in ('auto','ja','en'):
+            raise ValueError('Unsupported checkout language')
         if return_path not in ('/company','/intake'):
             raise ValueError('決済の戻り先を確認してください')
         if order['plan']['payment_mode'] != 'stripe_test':
@@ -59,12 +61,12 @@ class Payments:
         if order['status'] != 'awaiting_payment':
             raise ValueError('この注文は決済受付できません')
         result = self.api('checkout/sessions',{
-            'mode':'payment','payment_method_types[0]':'card',
+            'mode':'payment','locale':locale,'payment_method_types[0]':'card',
             'success_url':self.base+return_path+'?checkout=returned', 'cancel_url':self.base+return_path+'?checkout=cancelled',
             'client_reference_id':order['id'],'metadata[cx2_order_id]':order['id'],
             'line_items[0][quantity]':1,'line_items[0][price_data][currency]':'jpy',
             'line_items[0][price_data][unit_amount]':order['plan']['price_jpy'],
-            'line_items[0][price_data][product_data][name]':'Company X2 TEST '+order['plan']['service_name']
+            'line_items[0][price_data][product_data][name]':'Company X2 TEST '+({'csv_exact_dedup':'CSV exact deduplication','csv_trim':'CSV whitespace trimming','csv_to_json':'CSV to JSON','csv_audit':'CSV data audit'}[order['plan']['service_key']] if locale=='en' else order['plan']['service_name'])
         },idempotency_key='cx2-checkout-'+order['id'])
         parsed = urlparse(result.get('url',''))
         if (not re.fullmatch(r'cs_test_[A-Za-z0-9]+',result.get('id','')) or parsed.scheme != 'https'

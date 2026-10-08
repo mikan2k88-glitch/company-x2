@@ -108,9 +108,13 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
             if path == '/api/health':
                 if not store.ping():
                     return self.respond(503, {'status': 'storage_unavailable'})
-                return self.respond(200, {'status': 'ok', 'endpoint': 'E16', 'mode': 'sandbox',
+                return self.respond(200, {'status': 'ok', 'endpoint': 'E17', 'mode': 'sandbox',
                     'storage': 'supabase' if hasattr(store, 'rpc') else 'sqlite',
                     'payments_enabled': False, 'outreach_enabled': False, 'ai_connected': False})
+            if path == '/services':
+                return self.respond(200, (WEB.parent / 'services.html').read_bytes(), 'text/html; charset=utf-8')
+            if path == '/customer-i18n.js':
+                return self.respond(200, (WEB.parent / 'customer_i18n.js').read_bytes(), 'text/javascript; charset=utf-8')
             if path == '/intake':
                 return self.respond(200, (WEB.parent / 'intake.html').read_bytes(), 'text/html; charset=utf-8')
             if not self.access_allowed():
@@ -319,7 +323,7 @@ def main():
     scout_thread = threading.Thread(target=scout_worker, daemon=True) if scout_enabled else None
     if scout_thread:
         scout_thread.start()
-    print(f'Company X2 E16 sandbox listening on {args.host}:{server.server_port}', flush=True)
+    print(f'Company X2 E17 sandbox listening on {args.host}:{server.server_port}', flush=True)
     if not public:
         print(f'Local discovery admin token: {admin_token}', flush=True)
     try:

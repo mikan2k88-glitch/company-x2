@@ -61,14 +61,16 @@ def get_route(handler, path, store, ai, payments, scout_enabled):
 def post_route(handler, path, data, store, ai, payments):
     if path == '/api/company/intake-link':
         from .data_services import require_service
+        language=data.get('language','ja')
+        if language not in ('ja','en'):raise ValueError('Unsupported customer language')
         service=require_service(data.get('service_key'))
         token,expires=issue_intake(handler.intake_signing_key)
         host=handler.headers.get('Host')
         scheme='http' if host.split(':')[0] in ('localhost','127.0.0.1') else 'https'
-        handler.respond(200,{'url':scheme+'://'+host+'/intake#'+urlencode({'access':token,'service':service}),
+        handler.respond(200,{'url':scheme+'://'+host+'/intake?'+urlencode({'lang':language})+'#'+urlencode({'access':token,'service':service}),
             'expires_at':datetime.fromtimestamp(expires,timezone.utc).isoformat(),'mode':'test_only','live_price_jpy':None})
     elif path == '/api/company/sales-proposal':
-        handler.respond(200,sales_proposal((agent_state(store).get('items',[])+snapshot(store).get('items',[]))[:30],data.get('source_url')))
+        handler.respond(200,sales_proposal((agent_state(store).get('items',[])+snapshot(store).get('items',[]))[:30],data.get('source_url'),data.get('language','ja')))
     elif path == '/api/company/agent-scout':
         handler.respond(200,cloud_run(store) if data.get('action')=='cloud_run' else agent_register(store,data))
     elif path == '/api/company/lead-draft':
@@ -93,7 +95,7 @@ def post_route(handler, path, data, store, ai, payments):
         if not order:
             handler.respond(404,{'error':'Transaction not found'})
         elif path.endswith('/checkout'):
-            handler.respond(200,payments.checkout(store,order,token_hash,data.get('return_path','/company')))
+            handler.respond(200,payments.checkout(store,order,token_hash,data.get('return_path','/company'),data.get('locale','auto')))
         elif path.endswith('/reconcile'):
             handler.respond(200,payments.reconcile(store,order))
         else:
