@@ -7,10 +7,16 @@ from .public_scout import snapshot
 from .acquisition import organize, draft
 from .cloud_scout import run as cloud_run
 from .agent_scout import state as agent_state, register as agent_register, summary as agent_summary
+from .sales import assess as sales_assess, proposal as sales_proposal
+from .intake_access import issue as issue_intake
+from datetime import datetime, timezone
+from urllib.parse import urlencode
 
 
 def get_route(handler, path, store, ai, payments, scout_enabled):
-    if path == '/api/company/agent-scout/status':
+    if path == '/api/company/sales':
+        handler.respond(200,sales_assess((agent_state(store).get('items',[])+snapshot(store,enabled=scout_enabled).get('items',[]))[:30]))
+    elif path == '/api/company/agent-scout/status':
         handler.respond(200,agent_summary(store))
     elif path == '/api/company/agent-scout':
         saved=agent_state(store)
@@ -19,7 +25,8 @@ def get_route(handler, path, store, ai, payments, scout_enabled):
         handler.respond(200, company_status(store,ai,payments))
     elif path == '/api/company/candidates':
         data = snapshot(store,enabled=scout_enabled)
-        data.update(organize((agent_state(store).get('items',[])+data.get('items',[]))[:30]))
+        assessed=sales_assess((agent_state(store).get('items',[])+data.get('items',[]))[:30])
+        data.update(items=assessed['items'],summary=assessed['triage_summary'],notice=assessed['notice'])
         handler.respond(200,data)
     elif path == '/api/intake/config':
         ready = company_status(store,ai,payments)
@@ -52,10 +59,22 @@ def get_route(handler, path, store, ai, payments, scout_enabled):
 
 
 def post_route(handler, path, data, store, ai, payments):
-    if path == '/api/company/agent-scout':
+    if path == '/api/company/intake-link':
+        from .data_services import require_service
+        service=require_service(data.get('service_key'))
+        token,expires=issue_intake(handler.intake_signing_key)
+        host=handler.headers.get('Host')
+        scheme='http' if host.split(':')[0] in ('localhost','127.0.0.1') else 'https'
+        handler.respond(200,{'url':scheme+'://'+host+'/intake#'+urlencode({'access':token,'service':service}),
+            'expires_at':datetime.fromtimestamp(expires,timezone.utc).isoformat(),'mode':'test_only','live_price_jpy':None})
+    elif path == '/api/company/sales-proposal':
+        handler.respond(200,sales_proposal((agent_state(store).get('items',[])+snapshot(store).get('items',[]))[:30],data.get('source_url')))
+    elif path == '/api/company/agent-scout':
         handler.respond(200,cloud_run(store) if data.get('action')=='cloud_run' else agent_register(store,data))
     elif path == '/api/company/lead-draft':
-        handler.respond(200,draft((agent_state(store).get('items',[])+snapshot(store).get('items',[]))[:30],data.get('source_url')))
+        items=(agent_state(store).get('items',[])+snapshot(store).get('items',[]))[:30]
+        sales_proposal(items,data.get('source_url'))
+        handler.respond(200,draft(items,data.get('source_url')))
     elif path == '/api/company/ai':
         if data.get('ai_terms_accepted') is not True:
             raise ValueError('依頼文を設定済みのAI提供元へ送信することへの同意が必要です')

@@ -15,6 +15,7 @@ from .discovery import qualify
 from .settings import build_store
 from .supabase_store import StorageUnavailable
 from .github_source import GitHubUnavailable
+from .intake_access import valid as valid_intake, permits as intake_permits
 from .worker import process_one
 from .public_scout import scan_once, snapshot
 from .data_services import SERVICES, require_service
@@ -30,6 +31,7 @@ WEB = Path(__file__).parent / 'web.html'
 def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, scout_enabled=True, ai=None, payments=None, agent_token=None):
     ai, payments = ai or AIPlanner(), payments or Payments()
     class Handler(BaseHTTPRequestHandler):
+        intake_signing_key=access_password or admin_token
         def log_message(self, fmt, *args):
             # Do not log URLs, authorization or customer data.
             logging.info('HTTP %s', args[1] if len(args) > 1 else '')
@@ -58,6 +60,12 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
             return host in expected and (not origin or origin in {f'{scheme}://{h}' for h in expected for scheme in ('http','https')})
 
         def access_allowed(self):
+            path=urlparse(self.path).path
+            if intake_permits(self.command,path) and valid_intake(self.headers.get('X-Intake-Access',''),access_password or admin_token):
+                return True
+            if intake_permits(self.command,path) and self.headers.get('X-Intake-Access'):
+                self.respond(401,{'error':'受付リンクの期限切れ、または無効なリンクです。新しいリンクが必要です'})
+                return False
             if urlparse(self.path).path == '/api/company/agent-scout' and agent_token and len(agent_token)>=32:
                 auth=self.headers.get('Authorization','')
                 if auth.startswith('Bearer ') and secrets.compare_digest(auth[7:].encode(),agent_token.encode()):
@@ -100,17 +108,17 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
             if path == '/api/health':
                 if not store.ping():
                     return self.respond(503, {'status': 'storage_unavailable'})
-                return self.respond(200, {'status': 'ok', 'endpoint': 'E14', 'mode': 'sandbox',
+                return self.respond(200, {'status': 'ok', 'endpoint': 'E15', 'mode': 'sandbox',
                     'storage': 'supabase' if hasattr(store, 'rpc') else 'sqlite',
                     'payments_enabled': False, 'outreach_enabled': False, 'ai_connected': False})
+            if path == '/intake':
+                return self.respond(200, (WEB.parent / 'intake.html').read_bytes(), 'text/html; charset=utf-8')
             if not self.access_allowed():
                 return
             if path == '/':
                 return self.respond(200, WEB.read_bytes(), 'text/html; charset=utf-8')
             if path == '/company':
                 return self.respond(200, (WEB.parent / 'company.html').read_bytes(), 'text/html; charset=utf-8')
-            if path == '/intake':
-                return self.respond(200, (WEB.parent / 'intake.html').read_bytes(), 'text/html; charset=utf-8')
             if company_get(self,path,store,ai,payments,scout_enabled):
                 return
             if path == '/api/scout':
@@ -311,7 +319,7 @@ def main():
     scout_thread = threading.Thread(target=scout_worker, daemon=True) if scout_enabled else None
     if scout_thread:
         scout_thread.start()
-    print(f'Company X2 E09 sandbox listening on {args.host}:{server.server_port}', flush=True)
+    print(f'Company X2 E15 sandbox listening on {args.host}:{server.server_port}', flush=True)
     if not public:
         print(f'Local discovery admin token: {admin_token}', flush=True)
     try:

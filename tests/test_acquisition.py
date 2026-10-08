@@ -66,7 +66,8 @@ class IntakeHTTPTests(unittest.TestCase):
     order = http_tests.CompanyHTTPTests.order
     def test_intake_requires_auth_config_hides_admin_ledger_and_delivery_flow(self):
         self.assertIn('CSVの依頼受付',self.call('/intake',decode=False).decode())
-        with self.assertRaises(Exception):self.call('/intake',auth=False)
+        self.assertIn('CSVの依頼受付',self.call('/intake',auth=False,decode=False).decode())
+        with self.assertRaises(Exception):self.call('/api/intake/config',auth=False)
         config=self.call('/api/intake/config')
         self.assertTrue(config['database_ready'])
         self.assertNotIn('overview',config)
