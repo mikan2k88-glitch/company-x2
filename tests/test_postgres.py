@@ -178,9 +178,10 @@ class PostgresTests(unittest.TestCase):
 
     def test_live_payment_mode_price_and_receipt_ledger(self):
         from company_x2.company import quote,validate_creation
-        plan=quote('csv_to_json','id\n001\n','stripe_live',300,'https://example.com/terms')
+        risk=dict(sensitive_data='no',critical_use='no',extra_liability='no')
+        plan=quote('csv_to_json','id\n001\n','stripe_live',300,'https://example.com/terms',risk)
         payload=validate_creation({'csv':'id\n001\n','service_key':'csv_to_json','payment_mode':'stripe_live',
-            'terms_accepted':True,'request_key':'live-key-1234567890','plan_sha256':plan['plan_sha256']},'t'*32,300,'https://example.com/terms')
+            'risk_context':risk,'terms_accepted':True,'request_key':'live-key-1234567890','plan_sha256':plan['plan_sha256']},'t'*32,300,'https://example.com/terms')
         order=self.company_rpc('create',payload)
         self.assertEqual(self.company_rpc('live_ping'),{'live_schema_version':19})
         with self.assertRaises(subprocess.CalledProcessError):self.company_rpc('session',{'id':order,'token_hash':payload['token_hash'],
