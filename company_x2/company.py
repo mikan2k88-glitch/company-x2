@@ -88,7 +88,9 @@ def company_status(store, ai, payments):
         ready, overview = False, None
         database_error = '009_company.sqlをSupabaseに適用してください'
     live=payments.live_status(store)
-    return {'endpoint': 'E19', 'database_ready': ready, 'database_error': database_error,
+    from .refunds import ready as refunds_ready
+    return {'endpoint': 'E20', 'database_ready': ready, 'database_error': database_error,
+            'refunds_ready':refunds_ready(store),
             'ai': ai.status(), 'payments': payments.status(), 'overview': overview,
             'outreach_enabled': False, 'live_payments_enabled':live['ready'], 'live_payments':live,
             'autonomy': '検証注文の受付後は制作・検品・納品準備まで自動。営業と実決済は未稼働。'}

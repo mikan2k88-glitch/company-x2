@@ -3,6 +3,7 @@ import json
 import secrets
 import re
 import time
+from . import refund_store
 
 SCHEMA = '''
 create table if not exists company_orders (
@@ -30,6 +31,7 @@ create table if not exists company_ai_calls (
 def initialize(store):
     with store.connect() as db:
         db.executescript(SCHEMA)
+        db.executescript(refund_store.SCHEMA)
 
 
 def validate_submit(p):
@@ -60,6 +62,8 @@ def rpc(store, action, p):
             if not row:
                 raise ValueError('Transaction not found')
             return row
+        if action.startswith('refund_'):
+            return refund_store.rpc(db, action, p, event)
         if action == 'live_ping':return {'live_schema_version':19}
         if action == 'ping':
             return {'schema_version': 9}
@@ -87,6 +91,7 @@ def rpc(store, action, p):
                     'plan': json.loads(row['plan']), 'source_url': row['source_url'], 'error': row['error'],
                     'session_id': row['session_id'], 'session_url': row['session_url'],
                     'result': json.loads(row['result']) if row['result'] else None, 'revenue_jpy': 0,
+                    'refund': refund_store.info(db,row['id']),
                     'events': [dict(e) for e in db.execute('select kind,created_at from company_events where order_id=? order by id', (row['id'],))]}
         if action == 'session':
             row = get_row()
@@ -140,13 +145,17 @@ def rpc(store, action, p):
                               or len(result.get('artifact', {}).get('content', '').encode()) > 8_000_000
                               or not result.get('download_sha256')):
                 raise ValueError('Invalid artifact')
-            status = 'failed' if error else 'ready'
+            status = ('queued' if row['attempts'] < 3 else 'failed') if error else 'ready'
             db.execute('update company_orders set status=?,result=?,error=?,input=\'\',lease=null,lease_until=null where id=?',
                        (status,json.dumps(result) if result else None,error,row['id']))
+            if status == 'queued':
+                db.execute('update company_orders set input=? where id=?',(row['input'],row['id']))
             event(row['id'], status)
             return True
         if action == 'receipt':
             row = get_row()
+            if refund_store.info(db,row['id'])['state'] != 'none':
+                raise ValueError('Refunded order cannot be received')
             if row['status'] not in ('ready','delivered') or json.loads(row['result'])['download_sha256'] != p.get('download_sha256'):
                 raise ValueError('Delivery evidence mismatch')
             if row['status'] == 'ready':
@@ -170,12 +179,12 @@ def rpc(store, action, p):
             return True
         if action == 'overview':
             counts = {row['status']: row['n'] for row in db.execute('select status,count(*) as n from company_orders group by status')}
-            return {'counts':counts,'real_revenue_jpy':sum(json.loads(r['plan'])['price_jpy'] for r in db.execute("select plan from company_orders where payment_status='paid' and status='delivered'") if json.loads(r['plan'])['payment_mode']=='stripe_live'),
+            return {**refund_store.overview(db),'counts':counts,'real_revenue_jpy':sum(json.loads(r['plan'])['price_jpy'] for r in db.execute("select plan from company_orders where payment_status='paid' and status='delivered'") if json.loads(r['plan'])['payment_mode']=='stripe_live'),
                     'live_failed_paid_count':sum(json.loads(r['plan'])['payment_mode']=='stripe_live' for r in db.execute("select plan from company_orders where payment_status='paid' and status='failed'")),
                     'live_collected_jpy':sum(json.loads(r['plan'])['price_jpy'] for r in db.execute("select plan from company_orders where payment_status='paid'") if json.loads(r['plan'])['payment_mode']=='stripe_live'),
                     'test_payments_jpy':sum(json.loads(r['plan'])['price_jpy'] for r in db.execute("select plan from company_orders where payment_status='paid'") if json.loads(r['plan'])['payment_mode']=='stripe_test'),
                     'ai_reserved_micro_usd':db.execute('select coalesce(sum(reserve),0) from company_ai_calls').fetchone()[0],
-                    'recent':[dict(r) for r in db.execute('select id,status,payment_status,error,created_at from company_orders order by created_at desc,id desc limit 20')]}
+                    'recent':[{**dict(r),'refund_state':refund_store.info(db,r['id'])['state']} for r in db.execute('select id,status,payment_status,error,created_at from company_orders order by created_at desc,id desc limit 20')]}
         if action == 'pending_payments':
             rows=[dict(r) for r in db.execute("select id,session_id from company_orders where status='awaiting_payment' and session_id is not null and updated_at<datetime('now','-60 seconds') order by updated_at,id limit 3")]
             for row in rows:db.execute('update company_orders set updated_at=CURRENT_TIMESTAMP where id=?',(row['id'],))

@@ -30,6 +30,8 @@ class PostgresTests(unittest.TestCase):
         cls.sql(Path('supabase/migrations/009_company.sql').read_text())
         cls.sql(Path('supabase/migrations/019_live_payments.sql').read_text())
         cls.sql(Path('supabase/migrations/019_live_payments.sql').read_text())
+        cls.sql(Path('supabase/migrations/020_refunds.sql').read_text())
+        cls.sql(Path('supabase/migrations/020_refunds.sql').read_text())
 
     def setUp(self):
         self.sql('truncate company_x2.company_payment_events,company_x2.company_events,company_x2.company_orders,company_x2.company_ai_calls cascade;')
@@ -60,6 +62,79 @@ class PostgresTests(unittest.TestCase):
         payload=validate_creation({'csv':'id\n001\n','service_key':'csv_to_json','payment_mode':mode,
             'terms_accepted':True,'request_key':key,'plan_sha256':plan['plan_sha256']},'t'*32)
         return self.company_rpc('create',payload),payload
+
+    def refund_paid(self):
+        order,payload=self.company_create('stripe_test')
+        self.company_rpc('session',{'id':order,'token_hash':payload['token_hash'],
+            'session_id':'cs_test_refund','session_url':'https://checkout.stripe.com/c/pay/test'})
+        self.company_rpc('payment',{'id':order,'session_id':'cs_test_refund','event_id':'evt_refund',
+            'fingerprint':'a'*64,'amount':100,'currency':'jpy','livemode':False,'payment_status':'paid'})
+        self.company_rpc('refund_bind',{'id':order,'session_id':'cs_test_refund','payment_intent':'pi_refund','livemode':False})
+        return order,payload
+
+    def test_refund_sql_retry_deadline_and_free_compatibility(self):
+        order,payload=self.refund_paid()
+        self.assertIsNone(self.company_rpc('refund_claim'))
+        for attempt in range(3):
+            job=self.company_rpc('claim')
+            self.company_rpc('finish',{'id':order,'lease':job['lease'],'error':'fixture failure'})
+            saved=self.company_rpc('get',{'id':order,'token_hash':payload['token_hash']})
+            self.assertEqual(saved['status'],'queued' if attempt<2 else 'failed')
+        self.assertEqual(self.company_rpc('refund_claim')['id'],order)
+        self.assertIsNone(self.company_rpc('refund_claim'))
+        self.assertEqual(self.company_rpc('get',{'id':order,'token_hash':payload['token_hash']})['refund']['state'],'requesting')
+        for role in ('anon','authenticated','service_role'):
+            self.assertNotEqual(self.sql(f"set role {role}; select company_x2.cx2_company_e19('overview');",check=False).returncode,0)
+
+    def test_refund_sql_evidence_and_totals(self):
+        order,payload=self.refund_paid()
+        evidence={'refund_id':'re_refund','payment_intent':'pi_refund','amount':100,'currency':'jpy','status':'pending','livemode':False}
+        for change in ({'amount':True},{'amount':101},{'livemode':True},{'currency':'usd'},{'refund_id':'bad'}):
+            with self.assertRaises(subprocess.CalledProcessError):self.company_rpc('refund_update',{**evidence,**change})
+        self.company_rpc('refund_update',evidence)
+        self.assertEqual(self.company_rpc('overview')['test_refunded_jpy'],0)
+        self.company_rpc('refund_update',{**evidence,'status':'succeeded'})
+        self.company_rpc('refund_update',{**evidence,'status':'succeeded'})
+        self.company_rpc('refund_update',evidence) # stale pending cannot reverse completion
+        self.assertEqual(self.company_rpc('overview')['test_refunded_jpy'],100)
+        self.assertEqual(self.company_rpc('overview')['live_refunded_jpy'],0)
+        with self.assertRaises(subprocess.CalledProcessError):self.company_rpc('refund_update',{**evidence,'refund_id':'re_second'})
+        self.assertFalse(self.company_rpc('refund_update',{**evidence,'payment_intent':'pi_otherapp'}))
+        saved=self.company_rpc('get',{'id':order,'token_hash':payload['token_hash']})
+        self.assertEqual(saved['refund']['state'],'succeeded')
+        self.assertEqual(sum(e['kind']=='refund_succeeded' for e in saved['events']),1)
+
+    def test_refund_sql_deadline_invalidates_producer_lease(self):
+        order,payload=self.refund_paid();claim=self.company_rpc('claim')
+        self.sql("update company_x2.company_payment_events set created_at=now()-interval '25 hours';")
+        self.assertEqual(self.company_rpc('refund_claim')['id'],order)
+        with self.assertRaises(subprocess.CalledProcessError):self.company_rpc('finish',{'id':order,'lease':claim['lease'],'error':'late'})
+        self.assertIsNone(self.company_rpc('claim'))
+
+    def test_refund_worker_with_supabase_adapter_on_real_postgres(self):
+        import io
+        from company_x2.supabase_store import SupabaseStore
+        from company_x2.payments import Payments
+        from company_x2.refunds import process_one
+        from test_refunds import RefundTests,ENV
+        def opener(req,timeout):
+            payload=json.loads(req.data)
+            result=self.company_rpc(payload['p_action'],payload['p_payload'])
+            return io.BytesIO(json.dumps(result).encode())
+        fixture=RefundTests()
+        fixture.store=SupabaseStore('https://example.supabase.co','sb_secret_fixture',opener=opener)
+        fixture.posts=[];fixture.history=[];fixture.response_status='pending'
+        fixture.payments=Payments(ENV,fixture.opener)
+        fixture.order=fixture.create('stripe_live')
+        self.sql(f"update company_x2.company_orders set status='failed' where id='{fixture.order}';")
+        self.assertTrue(process_one(fixture.payments,fixture.store))
+        self.assertEqual(fixture.saved()['refund']['state'],'pending')
+        fixture.history=[fixture.refund('succeeded')]
+        self.sql("update company_x2.company_refund_jobs set checked_at=now()-interval '61 seconds';")
+        self.assertTrue(process_one(fixture.payments,fixture.store))
+        self.assertEqual(fixture.saved()['refund']['refunded_jpy'],300)
+        self.assertEqual(len(fixture.posts),1)
+        self.assertEqual(fixture.store.company_rpc('overview')['live_refunded_jpy'],300)
 
     def test_company_real_sql_adapter_production_receipt_and_permissions(self):
         import io

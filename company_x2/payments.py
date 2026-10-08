@@ -60,6 +60,8 @@ class Payments:
             try:schema=store.company_rpc('live_ping')=={'live_schema_version':19}
             except Exception:pass
         if not schema:reasons.append('019_live_payments.sqlの適用が必要です')
+        from .refunds import ready as refunds_ready
+        if not refunds_ready(store):reasons.append('020_refunds.sqlの適用が必要です')
         return {'ready':not reasons,'mode':'stripe_live','price_jpy':self.live_price,'terms_url':self.terms_url,
             'schema_ready':schema,'reasons':reasons}
 
@@ -78,7 +80,14 @@ class Payments:
             if len(raw) > 200_000:
                 raise ValueError('Provider response too large')
             result = json.loads(raw)
-            if not isinstance(result,dict) or result.get('livemode') is not live:
+            refund_list = re.fullmatch(r'refunds\?payment_intent=pi_[A-Za-z0-9]+&limit=100',path)
+            list_valid = (refund_list and isinstance(result,dict) and result.get('object')=='list'
+                and isinstance(result.get('data'),list) and type(result.get('has_more')) is bool
+                and all(isinstance(x,dict) and x.get('object')=='refund' and ('livemode' not in x or x['livemode'] is live) for x in result['data']))
+            refund_valid = (re.fullmatch(r'refunds(?:/re_[A-Za-z0-9]+)?',path)
+                and isinstance(result,dict) and result.get('object')=='refund'
+                and ('livemode' not in result or result['livemode'] is live))
+            if not isinstance(result,dict) or (not list_valid and not refund_valid and result.get('livemode') is not live):
                 raise ValueError('Test provider evidence required')
             return result
         except Exception:
@@ -137,6 +146,9 @@ class Payments:
             raise ValueError('Webhook署名またはイベントを確認できません') from None
 
     def apply_event(self, store, event):
+        if event.get('type') in ('refund.created','refund.updated','refund.failed'):
+            from .refunds import webhook
+            return webhook(self, store, event)
         if event.get('type') not in ('checkout.session.completed','checkout.session.async_payment_succeeded'):
             return {'received':True,'ignored':True}
         data=event.get('data',{})
@@ -167,6 +179,11 @@ class Payments:
             'livemode':live,'payment_status':'paid'}
         evidence['fingerprint'] = hashlib.sha256(json.dumps(evidence,sort_keys=True).encode()).hexdigest()
         store.company_rpc('payment', evidence)
+        if session.get('payment_intent'):
+            from .refunds import ready
+            if ready(store):
+                store.company_rpc('refund_bind', {'id':order,'session_id':session['id'],
+                    'payment_intent':session['payment_intent'],'livemode':live})
         return {'received':True,'verified':True}
 
     def reconcile(self, store, order):

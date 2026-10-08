@@ -25,6 +25,7 @@ from .planner import REQUESTS, plan_request
 from .ai_planner import AIPlanner
 from .payments import Payments
 from .company import process_transaction
+from .refunds import process_one as process_refund
 from .company_http import get_route as company_get, post_route as company_post
 
 WEB = Path(__file__).parent / 'web.html'
@@ -139,7 +140,7 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
                 if not store.ping():
                     return self.respond(503, {'status': 'storage_unavailable'})
                 live_ready=payments.live_status(store)['ready'] if payments.live_enabled else False
-                return self.respond(200, {'status': 'ok', 'endpoint': 'E19', 'mode': 'mixed' if live_ready else 'sandbox',
+                return self.respond(200, {'status': 'ok', 'endpoint': 'E20', 'mode': 'mixed' if live_ready else 'sandbox',
                     'storage': 'supabase' if hasattr(store, 'rpc') else 'sqlite',
                     'payments_enabled': live_ready, 'outreach_enabled': False, 'ai_connected': False})
             if path == '/services':
@@ -357,6 +358,10 @@ def main():
                             logging.warning('Test payment reconciliation deferred')
                 except Exception:
                     logging.warning('Test payment queue unavailable')
+                try:
+                    process_refund(payments,store)
+                except Exception:
+                    logging.warning('Refund processing deferred; no customer data logged')
             stop.wait(30)
     payment_thread = threading.Thread(target=payment_worker,daemon=True)
     payment_thread.start()
@@ -372,7 +377,7 @@ def main():
     scout_thread = threading.Thread(target=scout_worker, daemon=True) if scout_enabled else None
     if scout_thread:
         scout_thread.start()
-    print(f'Company X2 E19 sandbox listening on {args.host}:{server.server_port}', flush=True)
+    print(f'Company X2 E20 sandbox listening on {args.host}:{server.server_port}', flush=True)
     if not public:
         print(f'Local discovery admin token: {admin_token}', flush=True)
     try:
