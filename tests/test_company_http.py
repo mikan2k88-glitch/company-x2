@@ -31,6 +31,10 @@ class CompanyHTTPTests(unittest.TestCase):
     def tearDown(self):
         self.server.shutdown();self.server.server_close();self.thread.join();self.directory.cleanup()
     def call(self,path,data=None,owner='t'*32,auth=True,raw=None,headers=None,decode=True):
+        # Existing flow fixtures represent low-risk synthetic input. Explicitly
+        # supplied contexts (including None) are preserved for rejection tests.
+        if path in ('/api/company/quote','/api/company/transactions') and isinstance(data,dict) and 'risk_context' not in data:
+            data={**data,'risk_context':dict(sensitive_data='no',critical_use='no',extra_liability='no')}
         h={'Content-Type':'application/json','X-Order-Token':owner}
         if auth:h['Authorization']='Basic '+base64.b64encode(b'user:password').decode()
         h.update(headers or {})
