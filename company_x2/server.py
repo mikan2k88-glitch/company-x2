@@ -138,9 +138,10 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
             if path == '/api/health':
                 if not store.ping():
                     return self.respond(503, {'status': 'storage_unavailable'})
-                return self.respond(200, {'status': 'ok', 'endpoint': 'E19', 'mode': 'sandbox',
+                live_ready=payments.live_status(store)['ready'] if payments.live_enabled else False
+                return self.respond(200, {'status': 'ok', 'endpoint': 'E19', 'mode': 'mixed' if live_ready else 'sandbox',
                     'storage': 'supabase' if hasattr(store, 'rpc') else 'sqlite',
-                    'payments_enabled': False, 'outreach_enabled': False, 'ai_connected': False})
+                    'payments_enabled': live_ready, 'outreach_enabled': False, 'ai_connected': False})
             if path == '/services':
                 return self.respond(200, (WEB.parent / 'services.html').read_bytes(), 'text/html; charset=utf-8')
             if path == '/customer-i18n.js':
