@@ -53,9 +53,12 @@ def get_route(handler, path, store, ai, payments, scout_enabled):
                 from .delivery_safety import require_delivery
                 try:
                     require_delivery(order)
+                    if store.case_rpc('state',{'order_id':order['id']})['hold']:
+                        order['delivery_error']='問題報告の確認中、または不適合が確認されたため納品を保留しています。問い合わせ窓口で対応状況を確認してください。'
+                        raise ValueError('Support case pending')
                     order['delivery_allowed'] = True
                 except ValueError:
-                    order['delivery_error'] = '安全検査が未完了または不一致のため納品を保留しています。新しい計画が必要です。'
+                    order.setdefault('delivery_error','安全検査が未完了または不一致のため納品を保留しています。新しい計画が必要です。')
         if not order:
             handler.respond(404,{'error':'Transaction not found'})
         elif len(parts)==5:
@@ -137,6 +140,8 @@ def post_route(handler, path, data, store, ai, payments):
         else:
             from .delivery_safety import require_delivery
             require_delivery(order)
+            if store.case_rpc('state',{'order_id':order['id']})['hold']:
+                raise ValueError('問題報告を確認中のため受領を記録できません')
             store.company_rpc('receipt',{'id':order['id'],'token_hash':token_hash,
                                        'download_sha256':data.get('download_sha256')})
             public_intake.delivered(store,order['id'],handler.token())

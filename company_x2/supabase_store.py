@@ -31,7 +31,7 @@ class SupabaseStore:
         self.opener = opener or urllib.request.build_opener(NoRedirect()).open
 
     def rpc(self, action, payload=None, *, endpoint='cx2_store'):
-        if endpoint not in ('cx2_store', 'cx2_scout', 'cx2_services', 'cx2_company'):
+        if endpoint not in ('cx2_store', 'cx2_scout', 'cx2_services', 'cx2_company', 'cx2_support','cx2_case'):
             raise ValueError('Unknown RPC endpoint')
         headers = {'Content-Type': 'application/json', 'apikey': self.key}
         if not self.key.startswith('sb_secret_'):
@@ -50,7 +50,7 @@ class SupabaseStore:
                 401: 'Authentication rejected: verify server key and project URL match',
                 403: 'Permission denied: use a server secret/service-role key and verify RPC grant',
                 404: 'RPC unavailable: apply ' + {'cx2_store':'002_sandbox_rpc.sql', 'cx2_scout':'003_public_scout.sql',
-                    'cx2_services':'004_data_services.sql', 'cx2_company':'009_company.sql'}[endpoint] + ' in this project and reload the API schema',
+                    'cx2_services':'004_data_services.sql', 'cx2_company':'009_company.sql', 'cx2_support':'support_inbox migration','cx2_case':'order_support_cases migration'}[endpoint] + ' in this project and reload the API schema',
                 429: 'Supabase rate limit reached; retry later',
             }
             hint = hints.get(exc.code, 'Supabase service failed; verify project availability')
@@ -63,6 +63,12 @@ class SupabaseStore:
 
     def company_rpc(self, action, payload=None):
         return self.rpc(action, payload, endpoint='cx2_company')
+
+    def support_rpc(self, action, payload=None):
+        return self.rpc(action, payload, endpoint='cx2_support')
+
+    def case_rpc(self, action, payload=None):
+        return self.rpc(action, payload, endpoint='cx2_case')
 
     def services_ready(self):
         return self.rpc('ping', endpoint='cx2_services') == {'schema_version': 4}

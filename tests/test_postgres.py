@@ -32,8 +32,11 @@ class PostgresTests(unittest.TestCase):
         cls.sql(Path('supabase/migrations/019_live_payments.sql').read_text())
         cls.sql(Path('supabase/migrations/020_refunds.sql').read_text())
         cls.sql(Path('supabase/migrations/020_refunds.sql').read_text())
+        cls.sql(Path('supabase/migrations/20261008185934_support_inbox.sql').read_text())
+        cls.sql(Path('supabase/migrations/20261009140330_order_support_cases.sql').read_text())
 
     def setUp(self):
+        self.sql('truncate company_x2.support_tickets cascade;')
         self.sql('truncate company_x2.company_payment_events,company_x2.company_events,company_x2.company_orders,company_x2.company_ai_calls cascade;')
         self.sql('truncate company_x2.sandbox_events,company_x2.sandbox_orders cascade;')
         self.sql('truncate company_x2.service_events,company_x2.service_orders cascade;')
@@ -376,3 +379,33 @@ class PostgresTests(unittest.TestCase):
         self.assertNotEqual(self.sql("set role anon; select public.cx2_scout('snapshot');",check=False).returncode,0)
         # The existing order RPC still uses schema 2.
         self.assertEqual(self.rpc('ping'), {'schema_version':2})
+
+    def support_rpc(self, endpoint, action, payload=None):
+        data=json.dumps(payload or {}).replace("'","''")
+        response=self.sql(f"set role service_role; select coalesce(public.{endpoint}('{action}','{data}'::jsonb),'null'::jsonb);")
+        return json.loads(response.stdout.splitlines()[-1])
+
+    def test_order_support_hold_and_verified_refund(self):
+        from company_x2 import support
+        class Adapter:
+            def support_rpc(inner,a,p=None):return self.support_rpc('cx2_support',a,p)
+            def case_rpc(inner,a,p=None):return self.support_rpc('cx2_case',a,p)
+        store=Adapter();order,payload=self.refund_paid()
+        claim=self.company_rpc('claim')
+        self.company_rpc('finish',{'id':order,'lease':claim['lease'],'result':{'artifact':{'content':'[]'},'download_sha256':'a'*64,'service_key':'csv_to_json'}})
+        data=dict(kind='defect',message='fixture defect',request_key='support-request-key',order_id=order)
+        with self.assertRaises(subprocess.CalledProcessError):support.create(store,data,'a'*64,'w'*32)
+        ticket=support.create(store,data,'a'*64,'t'*32)['id']
+        self.assertEqual(support.create(store,data,'a'*64,'t'*32)['id'],ticket)
+        self.assertTrue(store.case_rpc('state',{'order_id':order})['hold'])
+        support.reply(store,dict(id=ticket,reply='under review'))
+        self.assertTrue(store.case_rpc('state',{'order_id':order})['hold'])
+        self.assertIsNone(support.get(store,ticket,'b'*64))
+        decision=dict(id=ticket,decision='confirmed_defect',reason='verified mismatch')
+        self.assertTrue(support.resolve(store,decision)['refund_requested'])
+        self.assertTrue(support.resolve(store,decision)['resolved'])
+        with self.assertRaises(subprocess.CalledProcessError):support.resolve(store,{**decision,'decision':'not_confirmed'})
+        self.assertEqual(self.company_rpc('refund_claim')['id'],order)
+        self.assertEqual(len(support.get(store,ticket,'a'*64)['case']['history']),2)
+        for role in ('anon','authenticated'):
+            self.assertNotEqual(self.sql(f"set role {role}; select public.cx2_case('list');",check=False).returncode,0)
