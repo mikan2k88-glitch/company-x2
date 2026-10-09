@@ -27,6 +27,7 @@ from .payments import Payments
 from .company import process_transaction
 from .refunds import process_one as process_refund
 from .company_http import get_route as company_get, post_route as company_post
+from .support_http import get_route as support_get, post_route as support_post
 
 WEB = Path(__file__).parent / 'web.html'
 
@@ -145,12 +146,20 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
                     'payments_enabled': live_ready, 'outreach_enabled': False, 'ai_connected': False})
             if path == '/services':
                 return self.respond(200, (WEB.parent / 'services.html').read_bytes(), 'text/html; charset=utf-8')
+            if path in ('/support','/sales-policy'):
+                return self.respond(200, (WEB.parent / ('support.html' if path=='/support' else 'sales-policy.html')).read_bytes(), 'text/html; charset=utf-8')
+            if path=='/api/support/config' or path.startswith('/api/support/tickets/'):
+                try:
+                    return support_get(self,path,store)
+                except ValueError:
+                    return self.respond(404,{'error':'問い合わせがありません'})
             if path == '/customer-i18n.js':
                 return self.respond(200, (WEB.parent / 'customer_i18n.js').read_bytes(), 'text/javascript; charset=utf-8')
             if path == '/intake':
                 return self.respond(200, (WEB.parent / 'intake.html').read_bytes(), 'text/html; charset=utf-8')
             if not self.access_allowed():
                 return
+            if support_get(self,path,store):return
             if path == '/':
                 return self.respond(200, WEB.read_bytes(), 'text/html; charset=utf-8')
             if path == '/company':
@@ -205,12 +214,13 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
                     logging.error('Webhook processing unavailable')
                     return self.respond(500,{'error':'Webhook processing unavailable; retry event'})
             public_endpoint=path in ('/api/public/start','/api/public/visit')
-            if not public_endpoint and not self.access_allowed():
+            support_endpoint=path=='/api/support/tickets'
+            if not public_endpoint and not support_endpoint and not self.access_allowed():
                 return
             try:
-                if public_endpoint:public_intake.check_rate()
+                if public_endpoint or support_endpoint:public_intake.check_rate()
                 size = int(self.headers.get('Content-Length', '0'))
-                maximum=1024 if public_endpoint else (public_intake.MAX_BYTES*6+4096 if getattr(self,'public_customer',False) else MAX_BYTES*6+4096)
+                maximum=12000 if support_endpoint else 1024 if public_endpoint else (public_intake.MAX_BYTES*6+4096 if getattr(self,'public_customer',False) else MAX_BYTES*6+4096)
                 if not 0 < size <= maximum:
                     return self.respond(413, {'error': 'Request size rejected'})
                 if self.headers.get('Content-Type', '').split(';')[0] != 'application/json':
@@ -220,6 +230,7 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
                 if not isinstance(data, dict):
                     raise ValueError('Object required')
                 path = urlparse(self.path).path
+                if support_post(self,path,data,store):return
                 if public_endpoint:
                     if path.endswith('/visit'):
                         public_intake.visit(store,data.get('request_key'))
@@ -358,4 +369,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
