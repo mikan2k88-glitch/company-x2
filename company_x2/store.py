@@ -44,6 +44,19 @@ class Store:
                 db.execute("alter table orders add column service_key text not null default 'csv_exact_dedup'")
         from .company_store import initialize
         initialize(self)
+        from .support_store import SCHEMA as SUPPORT_SCHEMA
+        with self.connect() as db:
+            db.executescript(SUPPORT_SCHEMA)
+        from .case_store import SCHEMA as CASE_SCHEMA
+        with self.connect() as db:db.executescript(CASE_SCHEMA)
+
+    def support_rpc(self, action, payload=None):
+        from .support_store import rpc
+        return rpc(self, action, payload or {})
+
+    def case_rpc(self, action, payload=None):
+        from .case_store import rpc
+        return rpc(self, action, payload or {})
 
     def company_rpc(self, action, payload=None):
         from .company_store import rpc
