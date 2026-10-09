@@ -2,7 +2,7 @@ from . import support
 
 def get_route(handler,path,store):
     if path=='/api/support/config':
-        handler.respond(200,{'ready':support.ready(store),'operator_mode':'individual',
+        handler.respond(200,{'ready':support.ready(store),'automation_ready':store.automation_rpc('ping')=={'automation_schema_version':24},'operator_mode':'individual',
             'notice':'本番販売は準備中です。問い合わせの受付だけでは販売者情報の開示は完了しません。'})
     elif path.startswith('/api/support/tickets/'):
         ticket=support.get(store,path.rsplit('/',1)[-1],handler.headers.get('X-Support-Token',''))
@@ -12,6 +12,8 @@ def get_route(handler,path,store):
         mapped={c['ticket_id']:{**c['ticket'],'case':{k:v for k,v in c.items() if k!='ticket'}} for c in cases}
         for t in store.support_rpc('list'):
             if t['id'] not in mapped:mapped[t['id']]=t
+        reviews={r['ticket_id']:r for r in store.automation_rpc('list')}
+        for id,t in mapped.items():t['automation']=reviews.get(id)
         handler.respond(200,{'items':list(mapped.values())})
     else:return False
     return True
