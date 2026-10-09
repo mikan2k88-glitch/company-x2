@@ -1,0 +1,33 @@
+name: Owned repository contact experiment
+on:
+  push:
+    branches: [codex/contact-experiment]
+    paths: [.github/workflows/contact-experiment.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: owned-contact-experiment
+  cancel-in-progress: false
+jobs:
+  experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify real GitHub contact against an owned fixture
+        env:
+          GITHUB_OUTREACH_TOKEN: ${{ github.token }}
+          GITHUB_SCOUT_TOKEN: ${{ github.token }}
+          PYTHONPATH: .
+        run: python scripts/github_contact_experiment.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: contact-experiment-result
+          path: contact-experiment-result.json
+          if-no-files-found: ignore
