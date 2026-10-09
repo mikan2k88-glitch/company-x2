@@ -330,6 +330,11 @@ def main():
     support_thread.start()
     def outreach_worker():
         from .outreach import run_once
+        from .render_contact_experiment import run as experiment
+        try:
+            report=experiment()
+            if report["status"]!="disabled":logging.warning("Owned Render contact experiment: %s",json.dumps(report))
+        except Exception:logging.warning("Owned Render contact experiment failed; credential and listing content omitted")
         while not stop.is_set():
             try:run_once(store)
             except Exception:logging.warning('External outreach deferred; no listing or credential content logged')
