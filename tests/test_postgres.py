@@ -382,7 +382,7 @@ class PostgresTests(unittest.TestCase):
 
     def support_rpc(self, endpoint, action, payload=None):
         data=json.dumps(payload or {}).replace("'","''")
-        response=self.sql(f"set role service_role; select public.{endpoint}('{action}','{data}'::jsonb);")
+        response=self.sql(f"set role service_role; select coalesce(public.{endpoint}('{action}','{data}'::jsonb),'null'::jsonb);")
         return json.loads(response.stdout.splitlines()[-1])
 
     def test_order_support_hold_and_verified_refund(self):
