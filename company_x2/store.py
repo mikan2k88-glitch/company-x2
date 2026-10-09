@@ -49,6 +49,12 @@ class Store:
             db.executescript(SUPPORT_SCHEMA)
         from .case_store import SCHEMA as CASE_SCHEMA
         with self.connect() as db:db.executescript(CASE_SCHEMA)
+        from .automation_store import SCHEMA as AUTOMATION_SCHEMA
+        with self.connect() as db:db.executescript(AUTOMATION_SCHEMA)
+
+    def automation_rpc(self, action, payload=None):
+        from .automation_store import rpc
+        return rpc(self,action,payload or {})
 
     def support_rpc(self, action, payload=None):
         from .support_store import rpc

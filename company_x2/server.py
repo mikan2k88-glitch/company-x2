@@ -320,6 +320,14 @@ def main():
                 stop.wait(60)
     company_thread = threading.Thread(target=company_worker,daemon=True)
     company_thread.start()
+    def support_worker():
+        from .support_automation import run_once
+        while not stop.is_set():
+            try:run_once(store)
+            except Exception:logging.warning('Support automation deferred; no inquiry content logged')
+            stop.wait(30)
+    support_thread=threading.Thread(target=support_worker,daemon=True)
+    support_thread.start()
     def payment_worker():
         while not stop.is_set():
             if payments.status()['ready'] or payments.live_key.startswith('sk_live_'):
@@ -364,6 +372,7 @@ def main():
         server.server_close()
         thread.join(timeout=5)
         company_thread.join(timeout=5)
+        support_thread.join(timeout=5)
         payment_thread.join(timeout=5)
 
 

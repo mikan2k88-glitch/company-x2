@@ -40,7 +40,9 @@ def get(store,id,token):
     if not re.fullmatch(r'sp_[a-f0-9]{32}',id):return None
     payload={'id':id,'token_hash':token_hash(token)}
     ticket=store.support_rpc('get',payload)
-    if ticket:ticket['case']=store.case_rpc('get',payload)
+    if ticket:
+        ticket['case']=store.case_rpc('get',payload)
+        ticket['automation']=store.automation_rpc('get',payload)
     return ticket
 
 def reply(store,data):
