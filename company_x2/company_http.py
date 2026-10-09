@@ -85,7 +85,10 @@ def get_route(handler, path, store, ai, payments, scout_enabled):
 
 
 def post_route(handler, path, data, store, ai, payments):
-    if path == '/api/company/outreach/prepare':
+    if path == '/api/company/outreach/check':
+        from .outreach_check import check
+        handler.respond(200,check())
+    elif path == '/api/company/outreach/prepare':
         from .outreach import collect,status
         handler.respond(200,{'collected':collect(store),**status(),'items':store.outreach_rpc('list')})
     elif path == '/api/company/intake-link':
