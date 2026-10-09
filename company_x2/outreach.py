@@ -16,7 +16,7 @@ def status(env=None):
     e=os.environ if env is None else env
     repos=[x.strip().lower() for x in e.get('OUTREACH_GITHUB_REPOS','').split(',') if x.strip()]
     valid=bool(repos) and len(repos)<=5 and all(re.fullmatch(r'[\w.-]+/[\w.-]+',x) for x in repos)
-    ready=e.get('OUTREACH_ENABLED','false').lower()=='true' and valid and bool(e.get('GITHUB_OUTREACH_TOKEN')) and bool(re.fullmatch(r'[\w-]{1,39}',e.get('GITHUB_OUTREACH_LOGIN','')))
+    ready=e.get('OUTREACH_ENABLED','false').lower()=='true' and valid and bool(e.get('GITHUB_OUTREACH_TOKEN')) and bool(re.fullmatch(r'[A-Za-z0-9_-]{1,39}(?:\[bot\])?',e.get('GITHUB_OUTREACH_LOGIN','')))
     return {'ready':ready,'platform':'github','repos':repos if valid else [],'max_sends_per_utc_day':1,
      'permission_marker':PERMISSION,'notice':'募集本文の自動応募許可、対象リポジトリ、専用トークンとログイン名が必要です。本番受注・料金・納期の約束は行いません。'}
 
