@@ -328,6 +328,14 @@ def main():
             stop.wait(30)
     support_thread=threading.Thread(target=support_worker,daemon=True)
     support_thread.start()
+    def outreach_worker():
+        from .outreach import run_once
+        while not stop.is_set():
+            try:run_once(store)
+            except Exception:logging.warning('External outreach deferred; no listing or credential content logged')
+            stop.wait(3600)
+    outreach_thread=threading.Thread(target=outreach_worker,daemon=True)
+    outreach_thread.start()
     def payment_worker():
         while not stop.is_set():
             if payments.status()['ready'] or payments.live_key.startswith('sk_live_'):
@@ -373,6 +381,7 @@ def main():
         thread.join(timeout=5)
         company_thread.join(timeout=5)
         support_thread.join(timeout=5)
+        outreach_thread.join(timeout=5)
         payment_thread.join(timeout=5)
 
 

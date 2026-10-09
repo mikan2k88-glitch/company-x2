@@ -35,8 +35,10 @@ class PostgresTests(unittest.TestCase):
         cls.sql(Path('supabase/migrations/20261008185934_support_inbox.sql').read_text())
         cls.sql(Path('supabase/migrations/20261009140330_order_support_cases.sql').read_text())
         cls.sql(Path('supabase/migrations/20261009145035_support_automation.sql').read_text())
+        cls.sql(Path('supabase/migrations/20261009150841_external_outbox.sql').read_text())
 
     def setUp(self):
+        self.sql('truncate company_x2.outreach_contacts;')
         self.sql('truncate company_x2.support_tickets cascade;')
         self.sql('truncate company_x2.company_payment_events,company_x2.company_events,company_x2.company_orders,company_x2.company_ai_calls cascade;')
         self.sql('truncate company_x2.sandbox_events,company_x2.sandbox_orders cascade;')
@@ -437,3 +439,14 @@ class PostgresTests(unittest.TestCase):
         for role in ('anon','authenticated'):
             self.assertNotEqual(self.sql(f"set role {role}; select public.cx2_support_auto('pending');",check=False).returncode,0)
             self.assertNotEqual(self.sql(f"set role {role}; select * from company_x2.support_reviews;",check=False).returncode,0)
+
+    def test_outreach_claim_replay_and_private_history(self):
+        rpc=lambda a,p=None:self.support_rpc('cx2_outreach',a,p)
+        data=dict(id='ot_'+'a'*32,url='https://github.com/example/tasks/issues/1',issue_id='123',author='requester',message='fixture condition inquiry')
+        rpc('prepare',data);rpc('prepare',data);self.assertEqual(len(rpc('list')),1)
+        self.assertEqual(rpc('claim')['id'],data['id']);self.assertIsNone(rpc('claim'))
+        rpc('uncertain',{'id':data['id']});self.assertIsNone(rpc('claim'))
+        self.assertFalse(rpc('finish',{'id':data['id'],'comment_url':data['url']+'#issuecomment-9'}))
+        self.assertEqual(rpc('list')[0]['status'],'uncertain')
+        for role in ('anon','authenticated'):
+            self.assertNotEqual(self.sql(f"set role {role}; select public.cx2_outreach('list');",check=False).returncode,0)
