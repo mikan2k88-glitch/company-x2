@@ -34,6 +34,7 @@ class PostgresTests(unittest.TestCase):
         cls.sql(Path('supabase/migrations/020_refunds.sql').read_text())
         cls.sql(Path('supabase/migrations/20261008185934_support_inbox.sql').read_text())
         cls.sql(Path('supabase/migrations/20261009140330_order_support_cases.sql').read_text())
+        cls.sql(Path('supabase/migrations/20261009145035_support_automation.sql').read_text())
 
     def setUp(self):
         self.sql('truncate company_x2.support_tickets cascade;')
@@ -390,6 +391,7 @@ class PostgresTests(unittest.TestCase):
         class Adapter:
             def support_rpc(inner,a,p=None):return self.support_rpc('cx2_support',a,p)
             def case_rpc(inner,a,p=None):return self.support_rpc('cx2_case',a,p)
+            def automation_rpc(inner,a,p=None):return self.support_rpc('cx2_support_auto',a,p)
         store=Adapter();order,payload=self.refund_paid()
         claim=self.company_rpc('claim')
         self.company_rpc('finish',{'id':order,'lease':claim['lease'],'result':{'artifact':{'content':'[]'},'download_sha256':'a'*64,'service_key':'csv_to_json'}})
@@ -409,3 +411,29 @@ class PostgresTests(unittest.TestCase):
         self.assertEqual(len(support.get(store,ticket,'a'*64)['case']['history']),2)
         for role in ('anon','authenticated'):
             self.assertNotEqual(self.sql(f"set role {role}; select public.cx2_case('list');",check=False).returncode,0)
+
+    def test_support_automation_atomic_audit_and_refund(self):
+        from company_x2 import support
+        from company_x2.company import process_transaction
+        from company_x2.support_automation import run_once
+        class Adapter:
+            def company_rpc(inner,a,p=None):return self.company_rpc(a,p)
+            def support_rpc(inner,a,p=None):return self.support_rpc('cx2_support',a,p)
+            def case_rpc(inner,a,p=None):return self.support_rpc('cx2_case',a,p)
+            def automation_rpc(inner,a,p=None):return self.support_rpc('cx2_support_auto',a,p)
+        store=Adapter();order,payload=self.refund_paid();self.assertTrue(process_transaction(store))
+        ticket=support.create(store,dict(kind='defect',message='fixture issue',request_key='auto-case-request',order_id=order),'a'*64,'t'*32)['id']
+        item=store.automation_rpc('pending')[0]
+        self.sql(f"update company_x2.company_orders set result=jsonb_set(result,'{{artifact,content}}','\"[]\"'::jsonb) where id='{order}';")
+        stale=dict(id=ticket,outcome='confirmed_defect',reason='fixture',version='support-auto-v1',expected=item['order'],expected_reply='')
+        self.assertFalse(store.automation_rpc('commit',stale))
+        self.assertEqual(run_once(store),1);self.assertEqual(run_once(store),0)
+        self.assertEqual(support.get(store,ticket,'a'*64)['automation']['outcome'],'confirmed_defect')
+        self.assertEqual(self.company_rpc('refund_claim')['id'],order)
+        faq=support.create(store,dict(kind='question',message='対応サービスは？',request_key='auto-faq-request'),'b'*64)['id']
+        self.assertEqual(run_once(store),1)
+        self.assertEqual(support.get(store,faq,'b'*64)['status'],'answered')
+        self.assertIsNone(support.get(store,faq,'a'*64))
+        for role in ('anon','authenticated'):
+            self.assertNotEqual(self.sql(f"set role {role}; select public.cx2_support_auto('pending');",check=False).returncode,0)
+            self.assertNotEqual(self.sql(f"set role {role}; select * from company_x2.support_reviews;",check=False).returncode,0)
