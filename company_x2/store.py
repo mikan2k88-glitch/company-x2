@@ -51,6 +51,12 @@ class Store:
         with self.connect() as db:db.executescript(CASE_SCHEMA)
         from .automation_store import SCHEMA as AUTOMATION_SCHEMA
         with self.connect() as db:db.executescript(AUTOMATION_SCHEMA)
+        from .outreach_store import SCHEMA as OUTREACH_SCHEMA
+        with self.connect() as db:db.executescript(OUTREACH_SCHEMA)
+
+    def outreach_rpc(self, action, payload=None):
+        from .outreach_store import rpc
+        return rpc(self,action,payload or {})
 
     def automation_rpc(self, action, payload=None):
         from .automation_store import rpc
