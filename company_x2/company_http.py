@@ -15,7 +15,10 @@ from urllib.parse import urlencode
 
 
 def get_route(handler, path, store, ai, payments, scout_enabled):
-    if path == '/api/company/public-intake':
+    if path == '/api/company/outreach':
+        from .outreach import status
+        handler.respond(200,{**status(),'items':store.outreach_rpc('list')})
+    elif path == '/api/company/public-intake':
         handler.respond(200,public_intake.summary(store))
     elif path == '/api/company/sales':
         handler.respond(200,sales_assess((agent_state(store).get('items',[])+snapshot(store,enabled=scout_enabled).get('items',[]))[:30]))
@@ -82,7 +85,10 @@ def get_route(handler, path, store, ai, payments, scout_enabled):
 
 
 def post_route(handler, path, data, store, ai, payments):
-    if path == '/api/company/intake-link':
+    if path == '/api/company/outreach/prepare':
+        from .outreach import collect,status
+        handler.respond(200,{'collected':collect(store),**status(),'items':store.outreach_rpc('list')})
+    elif path == '/api/company/intake-link':
         from .data_services import require_service
         language=data.get('language','ja')
         if language not in ('ja','en'):raise ValueError('Unsupported customer language')
