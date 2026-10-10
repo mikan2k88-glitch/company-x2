@@ -1,4 +1,4 @@
-import tempfile,unittest
+import tempfile,unittest,time
 from pathlib import Path
 from datetime import datetime,timezone
 from company_x2.store import Store
@@ -58,6 +58,13 @@ class AutonomyTests(unittest.TestCase):
  def test_revoked_consent_blocks_intake(self):
   self.contact('not accepted')
   with self.assertRaises(ValueError):autonomy.intake_source(self.store,ID)
+ def test_expired_invitation_is_held_without_external_post(self):
+  reply=autonomy.FREE+' '+autonomy.AI;self.contact(reply)
+  with self.store.connect() as db:db.execute("update outreach_contacts set attempted_at=datetime('now','-1 day')")
+  token,_=issue('k'*32,now=time.time()-8*86400,contact_id=ID)
+  self.store.autonomy_rpc('prepare_message',{'contact_id':ID,'reply_id':42,'body':'https://company-x2.onrender.com/intake#access='+token})
+  client=Client(reply);autonomy.cycle(self.store,{**ENV,'OUTREACH_ENABLED':'true'},client,signing_key='k'*32)
+  self.assertEqual(client.writes,0);self.assertEqual(self.store.autonomy_rpc('status')['messages'][0]['status'],'uncertain')
  def test_cost_unknown_and_loss_refund_failure_stop(self):
   self.assertFalse(autonomy.economics({})['live_allowed'])
   env={'COST_USD_JPY':'150','PAYMENT_FEE_RATE':'0.04','MONTHLY_FIXED_COST_JPY':'0'}
