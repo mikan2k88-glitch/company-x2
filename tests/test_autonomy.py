@@ -75,3 +75,27 @@ class AutonomyTests(unittest.TestCase):
   lease=self.store.autonomy_rpc('claim',{'id':'20261010_01'})
   self.assertFalse(self.store.autonomy_rpc('finish',{'id':'20261010_01','lease':'wrong','status':'success','report':{}}))
   self.assertTrue(self.store.autonomy_rpc('finish',{'id':'20261010_01','lease':lease,'status':'success','report':{}}))
+ def test_invalid_cost_settings_fail_closed(self):
+  env={'COST_USD_JPY':'150','PAYMENT_FEE_RATE':'0.04','MONTHLY_FIXED_COST_JPY':'0'}
+  for key in (*env,'MAX_MONTHLY_LOSS_JPY','LIVE_PRICE_JPY'):
+   for value in ('bad','NaN','Infinity','-1',''):
+    result=autonomy.economics({}, {**env,key:value})
+    self.assertFalse(result['live_allowed'],(key,value))
+    self.assertTrue(any(key in reason for reason in result['reasons']))
+  self.assertFalse(autonomy.economics({}, {**env,'PAYMENT_FEE_RATE':'1.01'})['live_allowed'])
+ def test_operating_status_distinguishes_fresh_failed_and_stale(self):
+  now=datetime(2026,10,10,12,tzinfo=timezone.utc)
+  self.assertFalse(autonomy.operating_status(self.store,ENV,now)['operations']['healthy'])
+  lease=self.store.autonomy_rpc('claim',{'id':'20261010_12'})
+  with self.store.connect() as db:db.execute("update autonomy_runs set started_at='2026-10-10T12:00:00Z'")
+  self.store.autonomy_rpc('finish',{'id':'20261010_12','lease':lease,'status':'success','report':{}})
+  status=autonomy.operating_status(self.store,ENV,now)
+  self.assertTrue(status['operations']['healthy']);self.assertFalse(status['operations']['external_sending_enabled'])
+  self.assertFalse(status['economics']['live_allowed'])
+  with self.store.connect() as db:db.execute("update autonomy_runs set status='failed'")
+  self.assertFalse(autonomy.operating_status(self.store,ENV,now)['operations']['healthy'])
+  with self.store.connect() as db:db.execute("update autonomy_runs set status='success',started_at='2026-10-10T09:00:00Z'")
+  self.assertFalse(autonomy.operating_status(self.store,ENV,now)['operations']['healthy'])
+ def test_invalid_cost_blocks_external_post(self):
+  client=Client();autonomy.cycle(self.store,{**ENV,'OUTREACH_ENABLED':'true','PAYMENT_FEE_RATE':'invalid'},client,signing_key='k'*32)
+  self.assertEqual(client.writes,0)

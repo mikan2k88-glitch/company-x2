@@ -16,8 +16,8 @@ from urllib.parse import urlencode
 
 def get_route(handler, path, store, ai, payments, scout_enabled):
     if path == '/api/company/autonomy':
-        from .autonomy import economics
-        handler.respond(200,{**store.autonomy_rpc('status'),'economics':economics(store.autonomy_rpc('metrics')),'live':payments.live_status(store)})
+        from .autonomy import operating_status
+        handler.respond(200,{**operating_status(store),'live':payments.live_status(store)})
     elif path == '/api/company/outreach':
         from .outreach import status
         handler.respond(200,{**status(),'items':store.outreach_rpc('list')})
