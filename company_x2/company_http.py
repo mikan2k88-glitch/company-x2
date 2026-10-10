@@ -15,7 +15,10 @@ from urllib.parse import urlencode
 
 
 def get_route(handler, path, store, ai, payments, scout_enabled):
-    if path == '/api/company/autonomy':
+    if path == '/api/company/free-trial':
+        from .free_trial import report
+        handler.respond(200,report(store))
+    elif path == '/api/company/autonomy':
         from .autonomy import operating_status
         handler.respond(200,{**operating_status(store),'live':payments.live_status(store)})
     elif path == '/api/company/outreach':
