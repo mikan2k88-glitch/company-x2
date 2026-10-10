@@ -1,0 +1,32 @@
+name: E36 owned GitHub and isolated delivery loop
+on:
+  push:
+    branches: [codex/e36-owned-loop]
+    paths: [.github/workflows/owned-loop-experiment.yml, scripts/owned_loop_experiment.py]
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: owned-company-loop-experiment
+  cancel-in-progress: false
+jobs:
+  experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify owned GitHub transport and isolated HTTP delivery
+        env:
+          GITHUB_OUTREACH_TOKEN: ${{ github.token }}
+          PYTHONPATH: .
+        run: python scripts/owned_loop_experiment.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e36-owned-loop-result
+          path: owned-loop-result.json
+          if-no-files-found: ignore
