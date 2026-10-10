@@ -9,6 +9,7 @@ def rpc(store,action,p):
         if action=='observe':
             return bool(db.execute("update outreach_contacts set reply_id=?,reply_text=?,next_message=? where id=? and status='sent' and coalesce(reply_id,0)<?",(p['reply_id'],p['reply_text'][:2000],p['next_message'][:2000],p['id'],p['reply_id'])).rowcount)
         if action=='claim':
+            if db.execute("select name from sqlite_master where name='autonomy_messages'").fetchone() and db.execute("select 1 from autonomy_messages where attempted_at>=date('now')").fetchone():return None
             if db.execute("select 1 from outreach_contacts where attempted_at>=date('now')").fetchone():return None
             r=db.execute("select * from outreach_contacts where status='draft' order by created_at,id limit 1").fetchone()
             if not r:return None
