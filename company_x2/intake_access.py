@@ -10,10 +10,14 @@ import time
 LIFETIME=7*24*3600
 def encode(raw):return base64.urlsafe_b64encode(raw).decode().rstrip('=')
 
-def issue(key,now=None,scope="intake_test"):
+def issue(key,now=None,scope="intake_test",contact_id=None):
     if scope not in ("intake_test","intake_live"):raise ValueError("Invalid intake scope")
     expires=int(time.time() if now is None else now)+LIFETIME
-    body=encode(json.dumps({'scope':scope,'exp':expires,'nonce':secrets.token_hex(16)},separators=(',',':')).encode())
+    claims={'scope':scope,'exp':expires,'nonce':secrets.token_hex(16)}
+    if contact_id is not None:
+        if scope!='intake_test' or not re.fullmatch(r'ot_[a-f0-9]{32}',contact_id):raise ValueError('Invalid contact grant')
+        claims['contact_id']=contact_id
+    body=encode(json.dumps(claims,separators=(',',':')).encode())
     signature=encode(hmac.new(key.encode(),body.encode(),hashlib.sha256).digest())
     return body+'.'+signature,expires
 
@@ -64,3 +68,10 @@ def live_valid(token,key):
     if not valid(token,key):return False
     body=token.split(".")[0]
     return json.loads(base64.urlsafe_b64decode(body+"="*(-len(body)%4))).get("scope")=="intake_live"
+
+
+def contact_claim(token,key):
+    if not valid(token,key):return None
+    body=token.split('.')[0]
+    claim=json.loads(base64.urlsafe_b64decode(body+'='*(-len(body)%4))).get('contact_id')
+    return claim if isinstance(claim,str) and re.fullmatch(r'ot_[a-f0-9]{32}',claim) else None
