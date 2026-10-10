@@ -36,9 +36,10 @@ class PostgresTests(unittest.TestCase):
         cls.sql(Path('supabase/migrations/20261009140330_order_support_cases.sql').read_text())
         cls.sql(Path('supabase/migrations/20261009145035_support_automation.sql').read_text())
         cls.sql(Path('supabase/migrations/20261009150841_external_outbox.sql').read_text())
+        cls.sql(Path('supabase/migrations/20261010101402_autonomous_control.sql').read_text())
 
     def setUp(self):
-        self.sql('truncate company_x2.outreach_contacts;')
+        self.sql('truncate company_x2.autonomy_messages,company_x2.autonomy_runs,company_x2.outreach_contacts;')
         self.sql('truncate company_x2.support_tickets cascade;')
         self.sql('truncate company_x2.company_payment_events,company_x2.company_events,company_x2.company_orders,company_x2.company_ai_calls cascade;')
         self.sql('truncate company_x2.sandbox_events,company_x2.sandbox_orders cascade;')
@@ -450,3 +451,23 @@ class PostgresTests(unittest.TestCase):
         self.assertEqual(rpc('list')[0]['status'],'uncertain')
         for role in ('anon','authenticated'):
             self.assertNotEqual(self.sql(f"set role {role}; select public.cx2_outreach('list');",check=False).returncode,0)
+
+    def test_autonomy_private_run_lease_and_global_send_limit(self):
+        from datetime import datetime,timezone
+        def rpc(action,p=None):
+            data=json.dumps(p or {}).replace("'","''")
+            result=self.sql(f"set role service_role; select coalesce(public.cx2_autonomy('{action}','{data}'::jsonb),'null'::jsonb);")
+            return json.loads(result.stdout.splitlines()[-1])
+        key=datetime.now(timezone.utc).strftime('%Y%m%d_%H')
+        lease=rpc('claim',{'id':key});self.assertTrue(lease);self.assertIsNone(rpc('claim',{'id':key}))
+        self.assertFalse(rpc('finish',{'id':key,'lease':'wrong','status':'success','report':{}}))
+        self.assertTrue(rpc('finish',{'id':key,'lease':lease,'status':'success','report':{}}))
+        self.assertNotEqual(self.sql("set role anon; select public.cx2_autonomy('status');",check=False).returncode,0)
+        self.assertEqual(rpc('metrics')['live_revenue_jpy'],0)
+        self.sql("insert into company_x2.outreach_contacts(id,url,issue_id,author,message,status,reply_id) values('ot_'||repeat('a',32),'https://github.com/example/tasks/issues/1','1','owner','fixture','sent',2);")
+        rpc('prepare_message',{'contact_id':'ot_'+'a'*32,'reply_id':2,'body':'fixture'})
+        self.assertTrue(rpc('claim_message'))
+        self.assertIsNone(rpc('claim_message'))
+        self.sql("insert into company_x2.outreach_contacts(id,url,issue_id,author,message) values('ot_'||repeat('b',32),'https://github.com/example/tasks/issues/2','2','owner','fixture');")
+        result=self.sql("set role service_role; select coalesce(public.cx2_outreach('claim'),'null'::jsonb);")
+        self.assertIsNone(json.loads(result.stdout.splitlines()[-1]))
