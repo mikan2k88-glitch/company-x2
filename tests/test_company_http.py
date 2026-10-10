@@ -87,3 +87,28 @@ class CompanyHTTPTests(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError):self.call('/api/company/ai',{'request':'convert'})
         with self.assertRaises(urllib.error.HTTPError):self.call('/api/company/quote',{'service_key':[],'csv':'a\n1\n'})
 
+    def test_external_signed_intake_download_and_receipt(self):
+        from company_x2 import autonomy
+        from company_x2.intake_access import issue
+        contact='ot_'+'b'*32;source='https://github.com/example/tasks/issues/1'
+        self.store.outreach_rpc('prepare',{'id':contact,'url':source,'issue_id':'65','author':'requester','message':'synthetic fixture'})
+        self.store.outreach_rpc('claim');self.store.outreach_rpc('finish',{'id':contact,'comment_url':source+'#issuecomment-9'})
+        self.store.outreach_rpc('observe',{'id':contact,'reply_id':42,'reply_text':autonomy.FREE+' '+autonomy.AI,'next_message':'fixture'})
+        token,_=issue('password',contact_id=contact)
+        headers={'X-Intake-Access':token}
+        payload={'service_key':'csv_to_json','csv':'id\n001\n','payment_mode':'sandbox','source_url':'https://wrong.example/'}
+        plan=self.call('/api/company/quote',payload,auth=False,headers=headers)['plan']
+        payload.update(plan_sha256=plan['plan_sha256'],terms_accepted=True,request_key='linked-http-fixture')
+        order=self.call('/api/company/transactions',payload,auth=False,headers=headers)['id']
+        self.assertTrue(process_transaction(self.store))
+        raw=self.call('/api/company/transactions/'+order+'/download',auth=False,headers=headers,decode=False)
+        self.assertEqual(json.loads(raw),[{'id':'001'}])
+        self.call('/api/company/receipt',{'id':order,'download_sha256':hashlib.sha256(raw).hexdigest()},auth=False,headers=headers)
+        saved=self.call('/api/company/transactions/'+order,auth=False,headers=headers)
+        self.assertEqual(saved['status'],'delivered')
+        persisted=self.store.company_rpc('get',{'id':order,'token_hash':self.store.digest('t'*32)})
+        self.assertEqual(persisted['source_url'],source)
+        with self.assertRaises(urllib.error.HTTPError):self.call('/api/company/autonomy',auth=False,headers=headers)
+        diagnosis=self.call('/api/company/autonomy')
+        self.assertEqual(diagnosis['endpoint'],'E35');self.assertIn('attention',diagnosis['operations'])
+
