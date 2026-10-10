@@ -149,6 +149,9 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
                     'payments_enabled': live_ready, 'outreach_enabled': False, 'ai_connected': False})
             if path == '/services':
                 return self.respond(200, (WEB.parent / 'services.html').read_bytes(), 'text/html; charset=utf-8')
+            if path == '/api/public/trial':
+                from .free_trial import policy
+                return self.respond(200,policy())
             if path in ('/support','/sales-policy'):
                 return self.respond(200, (WEB.parent / ('support.html' if path=='/support' else 'sales-policy.html')).read_bytes(), 'text/html; charset=utf-8')
             if path=='/api/support/config' or path.startswith('/api/support/tickets/'):
