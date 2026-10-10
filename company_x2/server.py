@@ -76,6 +76,7 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
 
         def access_allowed(self):
             path=urlparse(self.path).path
+            self.contact_id=None
             self.public_customer=False
             self.live_customer=False
             grant=self.headers.get('X-Intake-Access','')
@@ -91,6 +92,8 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
                 return True
             if intake_permits(self.command,path) and valid_intake(self.headers.get('X-Intake-Access',''),access_password or admin_token):
                 self.live_customer=live_valid(grant,access_password or admin_token)
+                from .intake_access import contact_claim
+                self.contact_id=contact_claim(grant,access_password or admin_token)
                 return True
             if intake_permits(self.command,path) and self.headers.get('X-Intake-Access'):
                 self.respond(401,{'error':'受付リンクの期限切れ、または無効なリンクです。新しいリンクが必要です'})
@@ -323,7 +326,9 @@ def main():
     def support_worker():
         from .support_automation import run_once
         while not stop.is_set():
-            try:run_once(store)
+            try:
+                from .autonomy import cycle
+                cycle(store,signing_key=password or admin_token)
             except Exception:logging.warning('Support automation deferred; no inquiry content logged')
             stop.wait(30)
     support_thread=threading.Thread(target=support_worker,daemon=True)
@@ -336,7 +341,9 @@ def main():
             if report["status"]!="disabled":logging.warning("Owned Render contact experiment: %s",json.dumps(report))
         except Exception:logging.warning("Owned Render contact experiment failed; credential and listing content omitted")
         while not stop.is_set():
-            try:run_once(store)
+            try:
+                from .autonomy import cycle
+                cycle(store,signing_key=password or admin_token)
             except Exception:logging.warning('External outreach deferred; no listing or credential content logged')
             stop.wait(3600)
     outreach_thread=threading.Thread(target=outreach_worker,daemon=True)

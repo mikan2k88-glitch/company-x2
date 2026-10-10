@@ -64,6 +64,12 @@ class Payments:
         if not schema:reasons.append('019_live_payments.sqlの適用が必要です')
         from .refunds import ready as refunds_ready
         if not refunds_ready(store):reasons.append('020_refunds.sqlの適用が必要です')
+        if store is not None:
+            try:
+                from .autonomy import economics
+                budget=economics(store.autonomy_rpc('metrics'))
+                reasons.extend(budget['reasons'])
+            except Exception:reasons.append('採算・運転記録を確認できないため本番受注を停止しています')
         return {'ready':not reasons,'mode':'stripe_live','price_jpy':self.live_price,'terms_url':self.terms_url,
             'schema_ready':schema,'reasons':reasons}
 
