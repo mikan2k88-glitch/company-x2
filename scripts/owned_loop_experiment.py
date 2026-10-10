@@ -86,7 +86,7 @@ def main():
                 order=call('/api/company/transactions',payload)['id']
                 if not process_transaction(store):raise ValueError('Processing missing')
                 artifact=call('/api/company/transactions/'+order+'/download',decode=False)
-                if artifact.decode().replace('\r\n','\n')!='id\n001\n':raise ValueError('Artifact mismatch')
+                if artifact.decode('utf-8-sig').replace('\r\n','\n')!='id\n001\n':raise ValueError('Artifact mismatch')
                 digest=hashlib.sha256(artifact).hexdigest()
                 if digest!=call('/api/company/transactions/'+order)['result']['download_sha256']:raise ValueError('Hash mismatch')
                 call('/api/company/receipt',{'id':order,'download_sha256':digest})
