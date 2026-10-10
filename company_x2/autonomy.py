@@ -131,6 +131,7 @@ def cycle(store,env=None,client=None,signing_key=None,now=None):
                     if not signing_key or not valid_invite(grant,signing_key) or contact_claim(grant,signing_key)!=message['contact_id']:raise ValueError('Invitation expired or invalid')
                     contact=next(x for x in store.outreach_rpc('list') if x['id']==message['contact_id'])
                     observed=client.observe(contact)
+                    if observed:store.outreach_rpc('observe',observed)
                     if not observed or observed['reply_id']!=message['reply_id'] or not consent(observed['reply_text'])['accepted']:raise ValueError('Consent changed')
                     path='/repos/'+'/'.join(contact['url'].split('/')[3:5])+'/issues/'+contact['url'].rsplit('/',1)[1]
                     current=client.api(path);user=client.api('/user')
