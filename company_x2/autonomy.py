@@ -17,14 +17,19 @@ def consent(text):
 
 def economics(metrics,env=None):
     env=os.environ if env is None else env
+    invalid=[]
     def number(name,default=0):
         try:
-            value=float(env.get(name,default));return value if math.isfinite(value) and value>=0 else default
-        except (TypeError,ValueError):return default
+            value=float(env.get(name,default))
+            if not math.isfinite(value) or value<0:raise ValueError('Invalid cost setting')
+            return value
+        except (TypeError,ValueError):
+            invalid.append(name);return default
     orders=int(metrics.get('live_orders',0));failed=int(metrics.get('failed',0));total=int(metrics.get('orders',0))
     revenue=int(metrics.get('live_revenue_jpy',0));refund=int(metrics.get('live_refunds_jpy',0))
     fx=number('COST_USD_JPY');fee=number('PAYMENT_FEE_RATE',0);fixed=number('MONTHLY_FIXED_COST_JPY')
-    known=fx>0 and 'PAYMENT_FEE_RATE' in env and fee<=1 and 'MONTHLY_FIXED_COST_JPY' in env
+    if fee>1:invalid.append('PAYMENT_FEE_RATE')
+    known=fx>0 and 'PAYMENT_FEE_RATE' in env and fee<=1 and 'MONTHLY_FIXED_COST_JPY' in env and not invalid
     cost=math.ceil(int(metrics.get('ai_reserved_micro_usd',0))*fx/1_000_000+revenue*fee+fixed) if known else None
     net=revenue-refund-cost if cost is not None else None
     loss=number('MAX_MONTHLY_LOSS_JPY',1000)
@@ -34,11 +39,39 @@ def economics(metrics,env=None):
     if orders>=5 and int(metrics.get('refunded_orders',0))/orders>=0.2:reasons.append('返金率が20%以上です')
     if total>=10 and failed/total>=0.3:reasons.append('加工失敗率が30%以上です')
     current=max(50,min(10000,int(number('LIVE_PRICE_JPY',100))))
+    if invalid:reasons.append('費用設定が不正です: '+', '.join(sorted(set(invalid))))
     # A recommendation only. Do not silently change accepted or quoted prices.
     suggested=min(10000,max(50,math.ceil((cost or 0)/max(orders,1)/max(0.01,1-fee)*1.2))) if orders>=10 and known else current
     return {'live_allowed':not reasons,'reasons':reasons,'net_estimate_jpy':net,'estimated_cost_jpy':cost,
       'cost_basis':'AI予約額による保守的な見積もり。実際の請求額ではありません。',
       'suggested_price_jpy':suggested,'price_auto_applied':False,'metrics':metrics}
+
+def operating_status(store,env=None,now=None):
+    """Read-only operating diagnosis; never retries sends or accepts a paid job."""
+    env=os.environ if env is None else env
+    now=now or datetime.now(timezone.utc)
+    state=store.autonomy_rpc('status');budget=economics(store.autonomy_rpc('metrics'),env)
+    reasons=[];latest=state['runs'][0] if state['runs'] else None
+    age=None
+    if latest:
+        try:
+            started=datetime.fromisoformat(latest['started_at'].replace('Z','+00:00'))
+            if started.tzinfo is None:started=started.replace(tzinfo=timezone.utc)
+            age=max(0,int((now-started).total_seconds()))
+        except (ValueError,TypeError):pass
+    if latest is None:reasons.append('運転記録がありません。定期起動と接続を確認してください。')
+    elif age is None or age>7200:reasons.append('2時間以内の運転記録を確認できません。定期起動・Render・DBを確認してください。')
+    if latest and latest['status']=='failed':reasons.append('直近の工程が失敗しました。原因を解消し、次の時間枠で実行してください。')
+    if latest and latest['status']=='processing' and age is not None and age>900:reasons.append('工程が15分以上処理中です。同じ時間枠の再実行は行いません。')
+    if latest and (latest.get('report') or {}).get('source_errors'):reasons.append('探索元の取得に失敗しています。GitHubの権限・接続を確認してください。')
+    uncertain=sum(m['status'] in ('sending','uncertain') for m in state['messages'])
+    if uncertain:reasons.append('受付案内の送信結果を確認してください。自動再送は停止しています。')
+    sending=outreach.status(env)
+    return {**state,'endpoint':'E35','economics':budget,'operations':{
+      'healthy':not reasons,'attention':reasons,'last_run_age_seconds':age,
+      'external_sending_enabled':sending['ready'],'external_sending_notice':sending['notice'],
+      'uncertain_messages':uncertain,'schedule_notice':'Supabaseから毎時15分に起動します。実行記録だけでは起動元は判別できません。',
+      'resume_notice':'原因を修正した後、次の時間枠で再開します。結果不明の送信は自動再送しません。'}}
 
 def preview(store,env=None,client=None):
     env=os.environ if env is None else env;client=client or outreach.GitHubContact(env)
