@@ -153,6 +153,8 @@ def cycle(store,env=None,client=None,signing_key=None,now=None):
                         store.outreach_rpc('finish',{'id':job['id'],'comment_url':sent['html_url']});report['sent']=1
                     except Exception:store.outreach_rpc('uncertain',{'id':job['id']})
         report['economics']=economics(store.autonomy_rpc('metrics'),env)
+        from .free_trial import policy as trial_policy,report as trial_report
+        if trial_policy(env)['enabled']:report['free_trial']=trial_report(store,env)
         store.autonomy_rpc('finish',{'id':run_id,'lease':lease,'status':'success','report':report})
         return report
     except Exception:
