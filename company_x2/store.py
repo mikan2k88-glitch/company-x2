@@ -101,6 +101,10 @@ class Store:
         with self.connect() as db:db.executescript(SCHEMA)
         return rpc(self,action,payload or {})
 
+    def trial_rpc(self,action,payload=None):
+        from .trial_store import rpc
+        return rpc(self,action,payload or {})
+
     def submit(self, text, request_key, token, service_key='csv_exact_dedup'):
         require_service(service_key)
         if not 16 <= len(request_key) <= 128 or not 32 <= len(token) <= 128:
