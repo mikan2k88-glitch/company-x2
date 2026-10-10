@@ -99,3 +99,33 @@ class AutonomyTests(unittest.TestCase):
  def test_invalid_cost_blocks_external_post(self):
   client=Client();autonomy.cycle(self.store,{**ENV,'OUTREACH_ENABLED':'true','PAYMENT_FEE_RATE':'invalid'},client,signing_key='k'*32)
   self.assertEqual(client.writes,0)
+ def test_invitation_post_timeout_is_not_retried_in_next_hour(self):
+  reply=autonomy.FREE+' '+autonomy.AI;self.contact(reply)
+  with self.store.connect() as db:db.execute("update outreach_contacts set attempted_at=datetime('now','-1 day')")
+  class AmbiguousClient(Client):
+   def api(inner,path,data=None):
+    if data:
+     super().api(path,data)
+     raise TimeoutError('Server accepted comment; response lost')
+    return super().api(path,data)
+  client=AmbiguousClient(reply);now=datetime.now(timezone.utc)
+  autonomy.cycle(self.store,{**ENV,'OUTREACH_ENABLED':'true'},client,signing_key='k'*32,now=now)
+  self.assertEqual(client.writes,1)
+  self.assertEqual(self.store.autonomy_rpc('status')['messages'][0]['status'],'uncertain')
+  from datetime import timedelta
+  autonomy.cycle(self.store,{**ENV,'OUTREACH_ENABLED':'true'},client,signing_key='k'*32,now=now+timedelta(hours=1))
+  self.assertEqual(client.writes,1)
+ def test_consent_revocation_between_prepare_and_post_is_held(self):
+  reply=autonomy.FREE+' '+autonomy.AI;self.contact(reply)
+  with self.store.connect() as db:db.execute("update outreach_contacts set attempted_at=datetime('now','-1 day')")
+  class RevokingClient(Client):
+   reads=0
+   def observe(inner,contact):
+    inner.reads+=1
+    return {'id':contact['id'],'reply_id':42 if inner.reads==1 else 44,
+      'reply_text':reply if inner.reads==1 else 'Consent withdrawn','next_message':'fixture'}
+  client=RevokingClient(reply)
+  autonomy.cycle(self.store,{**ENV,'OUTREACH_ENABLED':'true'},client,signing_key='k'*32)
+  self.assertEqual(client.writes,0)
+  self.assertEqual(self.store.autonomy_rpc('status')['messages'][0]['status'],'uncertain')
+  with self.assertRaises(ValueError):autonomy.intake_source(self.store,ID)
