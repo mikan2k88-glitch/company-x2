@@ -15,7 +15,10 @@ from urllib.parse import urlencode
 
 
 def get_route(handler, path, store, ai, payments, scout_enabled):
-    if path == '/api/company/outreach':
+    if path == '/api/company/autonomy':
+        from .autonomy import economics
+        handler.respond(200,{**store.autonomy_rpc('status'),'economics':economics(store.autonomy_rpc('metrics')),'live':payments.live_status(store)})
+    elif path == '/api/company/outreach':
         from .outreach import status
         handler.respond(200,{**status(),'items':store.outreach_rpc('list')})
     elif path == '/api/company/public-intake':
@@ -39,11 +42,11 @@ def get_route(handler, path, store, ai, payments, scout_enabled):
         live=ready['live_payments']
         handler.respond(200,{'database_ready':ready['database_ready'],
             'database_error':ready['database_error'], 'payments_ready':ready['payments']['ready'] and not getattr(handler,'public_customer',False),
-            'public_free':getattr(handler,'public_customer',False),
+            'public_free':getattr(handler,'public_customer',False) or bool(getattr(handler,'contact_id',None)),
             'live_payments_ready':getattr(handler,'live_customer',False) and live['ready'],
             'live_price_jpy':live['price_jpy'],'sales_terms_url':live['terms_url'],
-            'max_bytes':public_intake.MAX_BYTES if getattr(handler,'public_customer',False) else 1000000,
-            'max_rows':public_intake.MAX_ROWS if getattr(handler,'public_customer',False) else 10000})
+            'max_bytes':public_intake.MAX_BYTES if getattr(handler,'public_customer',False) or getattr(handler,'contact_id',None) else 1000000,
+            'max_rows':public_intake.MAX_ROWS if getattr(handler,'public_customer',False) or getattr(handler,'contact_id',None) else 10000})
     elif path.startswith('/api/company/transactions/'):
         parts = path.strip('/').split('/')
         if len(parts) not in (4,5) or (len(parts)==5 and parts[4]!='download'):
@@ -85,7 +88,19 @@ def get_route(handler, path, store, ai, payments, scout_enabled):
 
 
 def post_route(handler, path, data, store, ai, payments):
-    if path == '/api/company/outreach/check':
+    contact_id=getattr(handler,'contact_id',None)
+    if contact_id and path in ('/api/company/quote','/api/company/transactions'):
+        from .autonomy import intake_source
+        if data.get('payment_mode','sandbox')!='sandbox':raise ValueError('外部受付は無料検証のみ対応します')
+        text=data.get('csv')
+        if not isinstance(text,str) or len(text.encode('utf-8'))>public_intake.MAX_BYTES:raise ValueError('無料検証のCSV容量上限を超えています')
+        import csv,io
+        if sum(1 for _ in csv.reader(io.StringIO(text)))>public_intake.MAX_ROWS+1:raise ValueError('無料検証の行数上限を超えています')
+        data={**data,'source_url':intake_source(store,contact_id)}
+    if path == '/api/company/autonomy/run':
+        from .autonomy import cycle
+        handler.respond(200,cycle(store,signing_key=handler.intake_signing_key))
+    elif path == '/api/company/outreach/check':
         from .outreach_check import check
         handler.respond(200,check())
     elif path == '/api/company/outreach/prepare':
@@ -106,7 +121,10 @@ def post_route(handler, path, data, store, ai, payments):
     elif path == '/api/company/sales-proposal':
         handler.respond(200,sales_proposal((agent_state(store).get('items',[])+snapshot(store).get('items',[]))[:30],data.get('source_url'),data.get('language','ja')))
     elif path == '/api/company/agent-scout':
-        handler.respond(200,cloud_run(store) if data.get('action')=='cloud_run' else agent_register(store,data))
+        if data.get('action')=='cycle':
+            from .autonomy import cycle
+            handler.respond(200,cycle(store,signing_key=handler.intake_signing_key))
+        else:handler.respond(200,cloud_run(store) if data.get('action')=='cloud_run' else agent_register(store,data))
     elif path == '/api/company/lead-draft':
         items=(agent_state(store).get('items',[])+snapshot(store).get('items',[]))[:30]
         sales_proposal(items,data.get('source_url'))
