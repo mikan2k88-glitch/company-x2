@@ -37,6 +37,17 @@ class PostgresTests(unittest.TestCase):
         cls.sql(Path('supabase/migrations/20261009145035_support_automation.sql').read_text())
         cls.sql(Path('supabase/migrations/20261009150841_external_outbox.sql').read_text())
         cls.sql(Path('supabase/migrations/20261010101402_autonomous_control.sql').read_text())
+        cls.sql(Path('supabase/migrations/20261010133238_free_trial_report.sql').read_text())
+
+    def test_trial_rpc_is_content_free_and_service_only(self):
+        order,_=self.company_create()
+        p=json.dumps({'ids':[order],'since':'1970-01-01T00:00:00Z'})
+        response=self.sql(f"set role service_role; select public.cx2_trial('report','{p}'::jsonb);")
+        rows=json.loads(response.stdout.splitlines()[-1])
+        self.assertEqual(rows[0]['service_key'],'csv_to_json')
+        self.assertEqual(set(rows[0]),{'service_key','status','processing_seconds'})
+        denied=subprocess.run(['psql',DSN,'-v','ON_ERROR_STOP=1','-c',"set role anon; select public.cx2_trial('report','{}'::jsonb);"],capture_output=True,text=True)
+        self.assertNotEqual(denied.returncode,0)
 
     def setUp(self):
         self.sql('truncate company_x2.autonomy_messages,company_x2.autonomy_runs,company_x2.outreach_contacts;')
