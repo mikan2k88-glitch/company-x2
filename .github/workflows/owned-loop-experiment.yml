@@ -2,7 +2,7 @@ name: E36 owned GitHub and isolated delivery loop
 on:
   push:
     branches: [codex/e36-owned-loop]
-    paths: [.github/workflows/owned-loop-experiment.yml]
+    paths: [.github/workflows/owned-loop-experiment.yml, scripts/owned_loop_experiment.py]
   workflow_dispatch:
 permissions:
   contents: read
