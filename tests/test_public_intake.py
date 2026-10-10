@@ -80,6 +80,21 @@ class PublicHTTPTests(unittest.TestCase):
     tearDown=http_tests.CompanyHTTPTests.tearDown
     call=http_tests.CompanyHTTPTests.call
 
+    def test_trial_info_and_content_free_private_report(self):
+        from test_free_trial import settings
+        with patch.dict('os.environ',settings()):
+            info=self.call('/api/public/trial',auth=False)
+            self.assertEqual(info['orders_per_day'],3);self.assertTrue(info['open'])
+            access=self.call('/api/public/start',{},auth=False)['access']
+            headers={'X-Intake-Access':access}
+            data=request('trial-http-request-key')
+            order=self.call('/api/company/transactions',data,auth=False,headers=headers)['id']
+            process_transaction(self.store)
+            report=self.call('/api/company/free-trial')
+            self.assertEqual(report['totals']['ready'],1)
+            self.assertNotIn(order,str(report));self.assertEqual(set(report['services']),{'csv_to_json'})
+            with self.assertRaises(urllib.error.HTTPError):self.call('/api/company/free-trial',auth=False,headers=headers)
+
     def test_public_start_to_verified_delivery_without_admin_or_invitation(self):
         self.call('/api/public/visit',{'request_key':'v'*32},auth=False)
         self.call('/api/public/visit',{'request_key':'v'*32},auth=False)

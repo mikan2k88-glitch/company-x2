@@ -55,8 +55,15 @@ def owner_hash(owner):
     return hashlib.sha256(owner.encode()).hexdigest()
 
 def start(store,owner):
-    owner_hash(owner)
+    digest=owner_hash(owner)
     with LOCK:
+        from .free_trial import policy,require_open
+        if policy()['enabled']:
+            # Renewal is allowed for an existing customer after closure. New
+            # quotes/orders remain gated separately; receipt/download stay open.
+            existing=any(t['owner']==digest and t.get('id') for x in records(store) for t in x['tickets'].values())
+            if not existing:require_open(store)
+            elif not policy()['open']:return
         state=load(store)
         if state['starts']>=STARTS_PER_DAY:raise LimitReached('Daily public start limit reached; retry after 00:00 UTC')
         state['starts']+=1;save(store,state)
@@ -78,6 +85,8 @@ def check_input(data):
 def reserve_quote(store,data):
     check_input(data)
     with LOCK:
+        from .free_trial import require_open
+        require_open(store)
         state=load(store)
         if state['quotes']>=QUOTES_PER_DAY:raise LimitReached('Daily public plan limit reached; retry after 00:00 UTC')
         state['quotes']+=1;save(store,state)
@@ -94,7 +103,10 @@ def create(store,data,owner):
         if existing:
             if any(existing[k]!=v for k,v in identity.items()):raise ValueError('Request key conflict')
         else:
-            if len(state['tickets'])>=ORDERS_PER_DAY or sum(x['owner']==payload['token_hash'] for x in state['tickets'].values())>=ORDERS_PER_OWNER:
+            from .free_trial import policy,require_open
+            require_open(store)
+            limit=policy()['orders_per_day'] if policy()['enabled'] else ORDERS_PER_DAY
+            if len(state['tickets'])>=limit or sum(x['owner']==payload['token_hash'] for x in state['tickets'].values())>=ORDERS_PER_OWNER:
                 raise LimitReached('Daily public order limit reached; retry after 00:00 UTC')
             state['tickets'][key]={**identity,'id':None,'delivered':False}
             save(store,state)  # A crash may consume a slot, never silently refund it.
