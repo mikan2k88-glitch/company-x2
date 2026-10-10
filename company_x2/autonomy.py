@@ -1,9 +1,9 @@
 """Conservative acquisition-to-intake coordinator. Listing text is never a command."""
 import hashlib,math,os,re
 from datetime import datetime,timezone
-from urllib.parse import urlencode
+from urllib.parse import urlencode,parse_qs
 from . import outreach
-from .intake_access import issue as invite
+from .intake_access import issue as invite,valid as valid_invite,contact_claim
 
 FREE='[company-x2: free verification accepted]'
 AI='[company-x2: AI processing allowed]'
@@ -93,6 +93,9 @@ def cycle(store,env=None,client=None,signing_key=None,now=None):
             message=store.autonomy_rpc('claim_message')
             if message:
                 try:
+                    fragment=message['body'].split('https://company-x2.onrender.com/intake#',1)[1]
+                    grant=parse_qs(fragment).get('access',[''])[0]
+                    if not signing_key or not valid_invite(grant,signing_key) or contact_claim(grant,signing_key)!=message['contact_id']:raise ValueError('Invitation expired or invalid')
                     contact=next(x for x in store.outreach_rpc('list') if x['id']==message['contact_id'])
                     observed=client.observe(contact)
                     if not observed or observed['reply_id']!=message['reply_id'] or not consent(observed['reply_text'])['accepted']:raise ValueError('Consent changed')
