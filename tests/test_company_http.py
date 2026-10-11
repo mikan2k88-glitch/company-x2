@@ -19,6 +19,27 @@ from company_x2.store import Store
 
 
 class CompanyHTTPTests(unittest.TestCase):
+    def test_template_experiment_requires_admin_and_current_consent(self):
+        data = {'purpose': 'Prepare product CSV', 'csv': 'sku\n001\n',
+                'columns': ['SKU'], 'mapping': {'SKU': 'sku'},
+                'risk_context': dict(sensitive_data='no', critical_use='no', extra_liability='no')}
+        path = '/api/company/template-work/plan'
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.call(path, data, auth=False)
+        self.assertEqual(error.exception.code, 401)
+        from company_x2.intake_access import public_issue
+        grant, _ = public_issue('password', 't'*32)
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.call(path, data, auth=False, headers={'X-Intake-Access': grant})
+        self.assertEqual(error.exception.code, 403)
+        proposal = self.call(path, data)
+        data.update(accepted=True, approval_sha256=proposal['approval_sha256'])
+        result = self.call('/api/company/template-work/execute', data)
+        self.assertTrue(result['report']['verified'])
+        self.assertIn('001', result['csv'])
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.call('/template-work', auth=False, decode=False)
+        self.assertEqual(error.exception.code, 401)
     def setUp(self):
         self.directory=tempfile.TemporaryDirectory();self.store=Store(Path(self.directory.name)/'db')
         def opener(req,timeout):

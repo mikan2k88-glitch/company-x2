@@ -91,6 +91,10 @@ def get_route(handler, path, store, ai, payments, scout_enabled):
 
 
 def post_route(handler, path, data, store, ai, payments):
+    if path in ('/api/company/template-work/plan', '/api/company/template-work/execute'):
+        from .template_work import safe_request
+        handler.respond(200, safe_request(data, execute_now=path.endswith('/execute')))
+        return True
     contact_id=getattr(handler,'contact_id',None)
     if contact_id and path in ('/api/company/quote','/api/company/transactions'):
         from .autonomy import intake_source

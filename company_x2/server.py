@@ -170,6 +170,8 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
                 return self.respond(200, WEB.read_bytes(), 'text/html; charset=utf-8')
             if path == '/company':
                 return self.respond(200, (WEB.parent / 'company.html').read_bytes(), 'text/html; charset=utf-8')
+            if path == '/template-work':
+                return self.respond(200, (WEB.parent / 'template-work.html').read_bytes(), 'text/html; charset=utf-8')
             if company_get(self,path,store,ai,payments,scout_enabled):
                 return
             if path == '/api/scout':
