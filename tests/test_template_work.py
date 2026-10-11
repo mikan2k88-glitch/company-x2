@@ -1,9 +1,21 @@
 import unittest
 from company_x2.template_work import plan, execute
 from company_x2.template_work import safe_request
+from company_x2.template_work import suggest
 
 
 class TemplateWorkTests(unittest.TestCase):
+    def test_bilingual_mapping_and_ambiguous_source(self):
+        data = {'purpose': 'Prepare product template', 'csv': 'sku,title\n001,Test\n',
+                'template_csv': '商品コード,商品名,価格\n',
+                'risk_context': dict(sensitive_data='no', critical_use='no', extra_liability='no')}
+        result = suggest(data)
+        self.assertEqual(result['mapping'], {'商品コード': 'sku', '商品名': 'title'})
+        self.assertEqual(result['plan']['questions'][0]['column'], '価格')
+        data.update(csv='sku,品番,title\n001,002,Test\n')
+        result = suggest(data)
+        self.assertNotIn('商品コード', result['mapping'])
+
     def test_safe_workflow_and_changed_purpose(self):
         data = {'purpose': 'Prepare product file', 'csv': 'sku\n001\n',
                 'columns': ['SKU'], 'mapping': {'SKU': 'sku'},
