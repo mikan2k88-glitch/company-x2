@@ -3,8 +3,49 @@ import csv
 import hashlib
 import io
 import json
+import unicodedata
 
 from .data_services import read_csv
+
+ALIASES = (
+    {'sku', '商品コード', '品番'},
+    {'title', 'productname', '商品名'},
+    {'description', '商品説明'},
+    {'price', '価格'},
+    {'imageurl', '画像url'},
+    {'color', 'colour', 'カラー', '色'},
+    {'size', 'サイズ'},
+)
+
+
+def normalized(value):
+    return ''.join(unicodedata.normalize('NFKC', value).casefold().split()).replace('_', '')
+
+
+def suggest(data):
+    """Bounded bilingual suggestions; ambiguous fields always need answers."""
+    from .delivery_safety import inspect_input
+    template = data.get('template_csv')
+    if not isinstance(template, str) or len(template.encode('utf-8')) > 50000:
+        raise ValueError('Provide a CSV template / CSVの完成形見本を指定してください')
+    inspect_input(template)
+    columns, _ = read_csv(template)
+    source, _ = read_csv(data.get('csv'))
+    mapping = {}
+    for column in columns:
+        candidates = [name for name in source if normalized(name) == normalized(column)]
+        if not candidates:
+            group = next((g for g in ALIASES if normalized(column) in g), None)
+            if group:
+                candidates = [name for name in source if normalized(name) in group]
+        if len(candidates) == 1:
+            mapping[column] = candidates[0]
+    # The ordinary safety, declared scope and purpose checks apply here too.
+    result = safe_request({**data, 'columns': columns, 'mapping': mapping, 'required': []})
+    result.update(columns=columns, mapping=mapping, required=[],
+                  source_columns=source, scope='Exact column transfer only; no creative rewriting or inferred values',
+                  required_confirmation='Confirm which destination columns must be populated / 必須列を確認してください')
+    return result
 
 
 def safe_request(data, execute_now=False):
