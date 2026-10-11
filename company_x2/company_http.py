@@ -15,6 +15,10 @@ from urllib.parse import urlencode
 
 
 def get_route(handler, path, store, ai, payments, scout_enabled):
+    if path == '/api/company/template-work/status':
+        from .template_session import summary
+        handler.respond(200, summary(store))
+        return True
     if path == '/api/company/free-trial':
         from .free_trial import report
         handler.respond(200,report(store))
@@ -91,6 +95,15 @@ def get_route(handler, path, store, ai, payments, scout_enabled):
 
 
 def post_route(handler, path, data, store, ai, payments):
+    if path in ('/api/company/template-work/request', '/api/company/template-work/process', '/api/company/template-work/receive'):
+        from . import template_session
+        action = path.rsplit('/', 1)[1]
+        handler.respond(200, getattr(template_session, action)(store, data))
+        return True
+    if path == '/api/company/template-work/suggest':
+        from .template_work import suggest
+        handler.respond(200, suggest(data))
+        return True
     if path in ('/api/company/template-work/plan', '/api/company/template-work/execute'):
         from .template_work import safe_request
         handler.respond(200, safe_request(data, execute_now=path.endswith('/execute')))
