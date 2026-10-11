@@ -19,6 +19,29 @@ from company_x2.store import Store
 
 
 class CompanyHTTPTests(unittest.TestCase):
+    def test_template_session_http_and_public_denial(self):
+        data = {'purpose': 'Prepare product file', 'csv': 'sku,title\n001,Test\n',
+                'template_csv': '商品コード,商品名\n',
+                'risk_context': dict(sensitive_data='no', critical_use='no', extra_liability='no')}
+        suggested = self.call('/api/company/template-work/suggest', data)
+        data.update(columns=suggested['columns'], mapping=suggested['mapping'], required=['商品コード'],
+                    request_key='http-experiment-001')
+        self.assertEqual(suggested['mapping']['商品コード'], 'sku')
+        record = self.call('/api/company/template-work/request', data)
+        data.update(accepted=True, approval_sha256=record['approval_sha256'])
+        artifact = self.call('/api/company/template-work/process', data)
+        self.call('/api/company/template-work/receive', dict(request_key=data['request_key'],
+                    artifact_sha256=artifact['artifact_sha256'], accepted=True))
+        status = self.call('/api/company/template-work/status')
+        self.assertEqual(status['counts']['received'], 1)
+        self.assertFalse(status['real_customer_evidence'])
+        from company_x2.intake_access import public_issue
+        grant, _ = public_issue('password', 't'*32)
+        for action in ('suggest', 'request', 'process', 'receive'):
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                self.call('/api/company/template-work/'+action, data, auth=False,
+                          headers={'X-Intake-Access': grant})
+            self.assertEqual(error.exception.code, 403)
     def test_template_experiment_requires_admin_and_current_consent(self):
         data = {'purpose': 'Prepare product CSV', 'csv': 'sku\n001\n',
                 'columns': ['SKU'], 'mapping': {'SKU': 'sku'},
