@@ -62,6 +62,11 @@ def start(store,owner):
             # Renewal is allowed for an existing customer after closure. New
             # quotes/orders remain gated separately; receipt/download stay open.
             existing=any(t['owner']==digest and t.get('id') for x in records(store) for t in x['tickets'].values())
+            if not existing:
+                from .template_customer import SOURCE as template_source
+                existing=any(x.get('source')==template_source and x.get('owner_hash')==digest
+                    and x.get('experimental') is False and x.get('status') in ('ready','received')
+                    for x in store.opportunities())
             if not existing:require_open(store)
             elif not policy()['open']:return
         state=load(store)

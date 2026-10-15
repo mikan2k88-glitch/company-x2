@@ -1,0 +1,63 @@
+<!doctype html><html lang="ja"><meta charset="utf-8"><title>Template work / データ整備の検証</title>
+<style>body{max-width:850px;margin:32px auto;background:#1b2230;color:#eee;font:16px sans-serif}textarea,input{width:100%;margin:8px 0;padding:8px;box-sizing:border-box}button{padding:12px;margin:8px}pre{white-space:pre-wrap}label{display:block}input[type=checkbox]{width:auto}</style>
+<h1>CSVテンプレート整形 / CSV template preparation</h1>
+<p>無料検証用のCSVテンプレート整形。元の値を保持し、不明な列は質問します。外部システムへの登録は行いません。資料本文は保存しません。再取得には同じ資料が必要です。<br>Free CSV template preparation. Exact values only; unresolved columns require answers. No external updates. Resubmit the same files to retrieve an artifact.</p><p><a href="/sales-policy">利用条件 / Service conditions</a> · <a href="/support">問い合わせ / Support</a></p><button id="start">無料検証を開始 / Start free verification</button>
+<p>再取得時は同じ目的・資料・列設定を先に入力し、最後に依頼の状態を確認してください。資料本文は復元されません。<br>To retrieve an artifact, enter the same purpose, files and mapping first, then restore the request.</p><label>既存依頼キー（再取得用） / Existing request key<input id="existing-key"></label><button id="restore">依頼の状態を確認 / Restore request</button>
+<label>目的 / Intended result<input id="purpose" value="商品一覧を指定形式に整える / Prepare product template"></label>
+<label>元CSV / Source CSV<textarea id="source" rows="5">sku,title
+001,Sample product</textarea></label>
+<label>完成形の見本CSV / Destination template CSV<textarea id="template">商品コード,商品名</textarea></label>
+<button id="suggest">列対応を提案 / Suggest column mapping</button>
+<div id="questions"></div>
+<details><summary>詳細な列設定 / Advanced column settings</summary>
+<label>完成テンプレートの列（JSON） / Destination columns<textarea id="columns">["SKU","Title"]</textarea></label>
+<label>列対応（JSON） / Destination to source mapping<textarea id="mapping">{"SKU":"sku","Title":"title"}</textarea></label>
+<label>必須列（JSON） / Required columns<textarea id="required">["SKU","Title"]</textarea></label>
+</details>
+<label><input type="checkbox" id="scope">個人情報・機密情報、重大判断・本番更新、追加責任条件を含まない / No sensitive data, critical use, production updates or extra liability requirements</label>
+<button id="plan">計画・確認事項 / Plan</button><pre id="result"></pre>
+<label><input type="checkbox" id="consent">表示された計画と利用条件を確認し、対応範囲内の整形に同意 / Accept the displayed plan and service conditions</label>
+<button id="execute" disabled>制作・検査 / Produce and verify</button><a id="download" hidden>CSVを保存 / Download CSV</a>
+<button id="receive" disabled>受領確認 / Confirm receipt</button>
+<script>
+let approved=null, blobURL=null, requestKey=null, artifactHash=null, access=null;
+let owner=null;try{owner=sessionStorage.getItem('cx2-intake-owner')||crypto.randomUUID();sessionStorage.setItem('cx2-intake-owner',owner)}catch{owner=null}
+const byId=id=>document.getElementById(id);
+function payload(){if(!byId('scope').checked)throw Error('範囲を確認してください / Confirm scope');return {purpose:byId('purpose').value,csv:byId('source').value,columns:JSON.parse(byId('columns').value),mapping:JSON.parse(byId('mapping').value),required:JSON.parse(byId('required').value),risk_context:{sensitive_data:'no',critical_use:'no',extra_liability:'no'}}}
+function reset(){approved=null;requestKey=null;artifactHash=null;byId('receive').disabled=true;byId('execute').disabled=true;byId('consent').checked=false;byId('download').hidden=true;if(blobURL){URL.revokeObjectURL(blobURL);blobURL=null}}
+document.querySelectorAll('input,textarea').forEach(el=>{if(el.id!=='consent')el.addEventListener('input',reset)});
+async function send(action,data){const r=await fetch('/api/intake/template/'+action,{method:'POST',headers:{'Content-Type':'application/json','X-Intake-Access':access||'','X-Order-Token':owner},body:JSON.stringify(data)});const value=await r.json();if(!r.ok)throw Error(value.error||'Request failed');return value}
+byId('start').onclick=async()=>{try{const r=await fetch('/api/public/start',{method:'POST',headers:{'Content-Type':'application/json','X-Order-Token':owner},body:'{}'});const v=await r.json();if(!r.ok)throw Error(v.error);access=v.access;byId('result').textContent='受付開始 / Ready'}catch(e){byId('result').textContent=e.message}};
+byId('plan').onclick=async()=>{reset();try{const data=payload();const value=await send('plan',data);requestKey=crypto.randomUUID();await send('request',{...data,request_key:requestKey});byId('result').textContent=JSON.stringify(value,null,2);approved=value.approval_sha256;byId('existing-key').value=requestKey;byId('execute').disabled=value.plan.questions.length>0}catch(e){reset();byId('result').textContent=e.message}};
+byId('suggest').onclick=async()=>{reset();byId('questions').replaceChildren();try{const value=await send('suggest',{...payload(),template_csv:byId('template').value});byId('columns').value=JSON.stringify(value.columns);byId('mapping').value=JSON.stringify(value.mapping);byId('required').value='[]';byId('result').textContent=JSON.stringify(value,null,2);for(const column of value.columns){const label=document.createElement('label');label.textContent=column+'：元列 / Source column ';const select=document.createElement('select');const empty=document.createElement('option');empty.value='';empty.textContent='確認が必要 / Select source';select.append(empty);for(const name of value.source_columns){const option=document.createElement('option');option.value=name;option.textContent=name;select.append(option)}select.value=value.mapping[column]||'';select.onchange=()=>{reset();const mapping=JSON.parse(byId('mapping').value);if(select.value)mapping[column]=select.value;else delete mapping[column];byId('mapping').value=JSON.stringify(mapping)};label.append(select);const required=document.createElement('input');required.type='checkbox';required.onchange=()=>{reset();const columns=new Set(JSON.parse(byId('required').value));if(required.checked)columns.add(column);else columns.delete(column);byId('required').value=JSON.stringify([...columns])};label.append(required,document.createTextNode('必須 / Required'));byId('questions').append(label)}}catch(e){byId('result').textContent=e.message}};
+byId('execute').onclick=async()=>{byId('execute').disabled=true;try{if(!approved||!byId('consent').checked)throw Error('計画への同意が必要 / Accept the plan');const value=await send('process',{...payload(),request_key:requestKey,accepted:true,approval_sha256:approved});artifactHash=value.artifact_sha256;byId('result').textContent=JSON.stringify(value.report,null,2);if(blobURL)URL.revokeObjectURL(blobURL);blobURL=URL.createObjectURL(new Blob([value.csv],{type:'text/csv;charset=utf-8'}));byId('download').href=blobURL;byId('download').download='prepared.csv';byId('download').hidden=false;byId('receive').disabled=false}catch(e){byId('result').textContent=e.message;byId('execute').disabled=false}};
+byId('receive').onclick=async()=>{try{const value=await send('receive',{request_key:requestKey,artifact_sha256:artifactHash,accepted:true});byId('result').textContent=JSON.stringify(value,null,2);byId('receive').disabled=true}catch(e){byId('result').textContent=e.message}};
+
+byId('restore').onclick=async()=>{reset();try{
+ const r=await fetch('/api/intake/template/status',{headers:{'X-Intake-Access':access||'','X-Order-Token':owner}});
+ const v=await r.json();if(!r.ok)throw Error(v.error||'State unavailable');
+ const item=v.items.find(x=>x.request_key===byId('existing-key').value.trim());
+ if(!item)throw Error('この利用者の依頼がありません / Request not found for this customer');
+ if(!['awaiting_consent','ready','received'].includes(item.status))throw Error('確認中です / Request held');
+ requestKey=item.request_key;approved=item.approval_sha256;artifactHash=item.artifact_sha256||null;
+ byId('execute').disabled=false;byId('result').textContent=JSON.stringify(item,null,2);
+ // Source and purpose must be re-entered; the server validates the stored hash.
+}catch(e){reset();byId('result').textContent=e.message}};
+// One UI operation at a time; never allow input edits to race consent or work.
+let busy=false;
+for(const button of document.querySelectorAll('button')){
+ const operation=button.onclick;
+ if(!operation)continue;
+ button.onclick=async event=>{
+  if(busy)return;
+  if(!owner){byId('result').textContent='セッション保存が使えません。受付を開始できません / Session storage unavailable; intake cannot start';return;}
+  busy=true;document.body.setAttribute('aria-busy','true');
+  const controls=[...document.querySelectorAll('input,textarea,select')];
+  const states=controls.map(el=>el.disabled);controls.forEach(el=>el.disabled=true);
+  try{await operation(event)}finally{
+   controls.forEach((el,i)=>el.disabled=states[i]);busy=false;
+   document.body.setAttribute('aria-busy','false');
+  }
+ };
+}
+</script></html>

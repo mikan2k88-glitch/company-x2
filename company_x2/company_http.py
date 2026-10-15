@@ -15,6 +15,13 @@ from urllib.parse import urlencode
 
 
 def get_route(handler, path, store, ai, payments, scout_enabled):
+    if path == '/api/intake/template/status':
+        if not getattr(handler,'public_customer',False):
+            handler.respond(403,{'error':'Free customer access required'})
+        else:
+            from .template_customer import status
+            handler.respond(200,status(store,handler.token()))
+        return True
     if path == '/api/company/template-work/status':
         from .template_session import summary
         handler.respond(200, summary(store))
@@ -95,6 +102,22 @@ def get_route(handler, path, store, ai, payments, scout_enabled):
 
 
 def post_route(handler, path, data, store, ai, payments):
+    if path in ('/api/intake/template/suggest','/api/intake/template/plan','/api/intake/template/request',
+                '/api/intake/template/process','/api/intake/template/receive'):
+        if not getattr(handler,'public_customer',False):
+            handler.respond(403,{'error':'Free customer access required'})
+            return True
+        from . import template_customer
+        action = path.rsplit('/',1)[1]
+        if action == 'suggest':
+            result = template_customer.suggestion(store,data,handler.token())
+        elif action == 'plan':
+            result = template_customer.preview(store,data,handler.token())
+        else:
+            if action == 'request':template_customer.preview(store,data,handler.token())
+            result = getattr(template_customer,action)(store,data,handler.token())
+        handler.respond(200,result)
+        return True
     if path in ('/api/company/template-work/request', '/api/company/template-work/process', '/api/company/template-work/receive'):
         from . import template_session
         action = path.rsplit('/', 1)[1]

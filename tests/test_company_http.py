@@ -19,6 +19,34 @@ from company_x2.store import Store
 
 
 class CompanyHTTPTests(unittest.TestCase):
+    def test_customer_template_private_workflow(self):
+        page=self.call('/template-intake',auth=False,decode=False)
+        self.assertIn(b'/api/intake/template/',page)
+        from company_x2.intake_access import public_issue
+        grant,_=public_issue('password','t'*32)
+        headers={'X-Intake-Access':grant}
+        data=dict(request_key='customer-http-001',purpose='Prepare product template',csv='sku\n001\n',
+                  columns=['SKU'],mapping={'SKU':'sku'},
+                  risk_context=dict(sensitive_data='no',critical_use='no',extra_liability='no'))
+        suggested=self.call('/api/intake/template/suggest',{**data,'template_csv':'商品コード\n'},
+                            auth=False,headers=headers)
+        self.assertEqual(suggested['mapping'],{'商品コード':'sku'})
+        record=self.call('/api/intake/template/request',data,auth=False,headers=headers)
+        data.update(accepted=True,approval_sha256=record['approval_sha256'])
+        artifact=self.call('/api/intake/template/process',data,auth=False,headers=headers)
+        self.assertIn('001',artifact['csv'])
+        self.call('/api/intake/template/receive',dict(request_key=data['request_key'],accepted=True,
+            artifact_sha256=artifact['artifact_sha256']),auth=False,headers=headers)
+        state=self.call('/api/intake/template/status',auth=False,headers=headers)
+        self.assertEqual(state['items'][0]['status'],'received')
+        self.assertNotIn('owner_hash',json.dumps(state))
+        other,_=public_issue('password','x'*32)
+        self.assertEqual(self.call('/api/intake/template/status',owner='x'*32,auth=False,
+            headers={'X-Intake-Access':other})['items'],[])
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.call('/api/intake/template/status')
+        self.assertEqual(error.exception.code,403)
+
     def test_template_session_http_and_public_denial(self):
         data = {'purpose': 'Prepare product file', 'csv': 'sku,title\n001,Test\n',
                 'template_csv': '商品コード,商品名\n',
