@@ -36,12 +36,15 @@ def report(store,env=None):
     completed=totals['ready']+totals['delivered']+totals['failed']
     rate=totals['failed']/completed if completed else None
     pause=p['enabled'] and completed>=3 and rate>=0.3
+    from .template_customer import metrics
+    template=metrics(store,p['starts_at'] if p['enabled'] else '1970-01-01T00:00:00Z')
+    pause=pause or (p['enabled'] and template['new_intake_paused'])
     advice=[]
     if totals['failed']:advice.append('失敗がある処理を合成CSVで再現し、安全検査・処理・納品経路を確認してください。顧客CSVはテストに転用しません。')
     if totals['ready']:advice.append('成果物の準備から受領までの案内を確認してください。未受領は処理失敗に数えません。')
     if not totals['accepted']:advice.append('実依頼の記録待ちです。実験の成功を顧客利用の成功率に混ぜません。')
     return {'endpoint':'E37','policy':p,'totals':totals,'services':services,
-      'failure_rate':rate,'new_intake_paused':pause,'development_actions':advice,
+      'failure_rate':rate,'new_intake_paused':pause,'development_actions':advice,'template_work':template,
       'privacy':'公開受付の注文だけを集計。CSV・成果物・問い合わせ本文・利用者トークン・注文IDは含みません。',
       'cost_notice':'公開CSV加工は外部AIを呼びません。管理側のAI利用費は別の予算予約で管理します。'}
 

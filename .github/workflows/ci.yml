@@ -11,6 +11,10 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m unittest discover -s tests -v
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: node tests/template_intake.test.cjs
   postgres:
     runs-on: ubuntu-latest
     services:

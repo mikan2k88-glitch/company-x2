@@ -163,6 +163,8 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
                 return self.respond(200, (WEB.parent / 'customer_i18n.js').read_bytes(), 'text/javascript; charset=utf-8')
             if path == '/intake':
                 return self.respond(200, (WEB.parent / 'intake.html').read_bytes(), 'text/html; charset=utf-8')
+            if path == '/template-intake':
+                return self.respond(200, (WEB.parent / 'template-intake.html').read_bytes(), 'text/html; charset=utf-8')
             if not self.access_allowed():
                 return
             if support_get(self,path,store):return

@@ -60,6 +60,9 @@ def public_valid(token,key,owner,now=None):
     except (ValueError,UnicodeError,TypeError):return False
 
 def public_permits(method,path):
+    if method=='GET' and path=='/api/intake/template/status':return True
+    if method=='POST' and path in ('/api/intake/template/suggest','/api/intake/template/plan','/api/intake/template/request',
+                                  '/api/intake/template/process','/api/intake/template/receive'):return True
     return (method=='GET' and permits(method,path)) or (method=='POST' and path in
         ('/api/company/quote','/api/company/transactions','/api/company/receipt'))
 
