@@ -3,6 +3,7 @@ import hashlib
 import re
 
 from .autonomy import consent
+from .intake_access import contact_claim
 
 
 def verified_contact(store, contact_id, reply_id):
@@ -34,3 +35,11 @@ def recheck_contact(store, contact_id, reply_id, client):
     if not consent(observed.get('reply_text'))['accepted']:
         raise ValueError('Current source consent withdrawn or changed')
     return {**manifest, 'source_rechecked': True}
+
+
+def invited_contact(store, grant, signing_key, reply_id, client):
+    """Derive contact identity from the verified invitation, never request JSON."""
+    contact_id = contact_claim(grant, signing_key)
+    if not contact_id:
+        raise ValueError('Valid contact-bound invitation required')
+    return recheck_contact(store, contact_id, reply_id, client)
