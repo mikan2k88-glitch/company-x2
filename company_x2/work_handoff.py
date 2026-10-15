@@ -21,3 +21,15 @@ def verified_contact(store, contact_id, reply_id):
             'consent_sha256': hashlib.sha256(evidence.encode()).hexdigest(),
             'status': 'awaiting_work_plan', 'external_delivery_allowed': False,
             'notice': 'Consent to free verification does not approve a work plan or external delivery.'}
+
+
+def recheck_contact(store, contact_id, reply_id, client):
+    """Refresh through the source adapter; an unavailable source blocks work."""
+    manifest = verified_contact(store, contact_id, reply_id)
+    contact = next(item for item in store.outreach_rpc('list') if item['id'] == contact_id)
+    observed = client.observe(contact)
+    if not isinstance(observed, dict) or str(observed.get('reply_id')) != reply_id:
+        raise ValueError('Current source reply unavailable or changed')
+    if not consent(observed.get('reply_text'))['accepted']:
+        raise ValueError('Current source consent withdrawn or changed')
+    return {**manifest, 'source_rechecked': True}

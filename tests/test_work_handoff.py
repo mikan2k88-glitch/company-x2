@@ -1,6 +1,6 @@
 import unittest
 from company_x2.autonomy import FREE, AI
-from company_x2.work_handoff import verified_contact
+from company_x2.work_handoff import verified_contact, recheck_contact
 
 
 class HandoffTests(unittest.TestCase):
@@ -23,3 +23,12 @@ class HandoffTests(unittest.TestCase):
         self.row['status']='draft'
         with self.assertRaises(ValueError):verified_contact(self.store,self.row['id'],'123')
         with self.assertRaises(ValueError):verified_contact(self.store,'other','123')
+
+    def test_live_recheck_fails_closed_on_missing_changed_and_revoked_reply(self):
+        client=type('Client',(),{})()
+        for observed in (None, {'reply_id':'124','reply_text':FREE+' '+AI},
+                         {'reply_id':'123','reply_text':'Consent withdrawn'}):
+            client.observe=lambda contact:observed
+            with self.assertRaises(ValueError):recheck_contact(self.store,self.row['id'],'123',client)
+        client.observe=lambda contact:{'reply_id':'123','reply_text':FREE+' '+AI}
+        self.assertTrue(recheck_contact(self.store,self.row['id'],'123',client)['source_rechecked'])
