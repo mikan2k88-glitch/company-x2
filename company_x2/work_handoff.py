@@ -60,3 +60,13 @@ def bind_request(store, grant, signing_key, reply_id, client, owner, request_key
         record['handoff'] = binding
         template_session.save(scoped, record)
     return {'status': 'awaiting_plan_consent', 'external_delivery_allowed': False}
+
+
+def process_request(store, grant, signing_key, reply_id, client, owner, data):
+    from . import template_customer
+    record = next((r for r in template_customer.OwnedStore(store, owner).opportunities()
+                   if r['external_id'] == data.get('request_key')), None)
+    if not record or not record.get('handoff'):
+        raise ValueError('Bound source handoff required')
+    return template_customer.process(store, data, owner,
+        handoff_check=lambda: invited_contact(store, grant, signing_key, reply_id, client))

@@ -4,7 +4,7 @@ from pathlib import Path
 from company_x2.autonomy import FREE, AI
 from company_x2.work_handoff import verified_contact, recheck_contact, invited_contact
 from company_x2.intake_access import issue
-from company_x2.work_handoff import bind_request
+from company_x2.work_handoff import bind_request, process_request
 from company_x2 import template_customer
 from company_x2.store import Store
 
@@ -65,3 +65,9 @@ class HandoffTests(unittest.TestCase):
             record=template_customer.OwnedStore(store,owner).opportunities()[0]
             self.assertEqual(record['handoff']['reply_id'],'123')
             self.assertNotIn('handoff',template_customer.status(store,owner)['items'][0])
+            data.update(accepted=True,approval_sha256=record['approval_sha256'])
+            with self.assertRaises(ValueError):template_customer.process(store,data,owner)
+            result=process_request(store,grant,'test-key','123',client,owner,data)
+            self.assertIn('001',result['csv'])
+            self.row['reply_text']='Consent withdrawn'
+            with self.assertRaises(ValueError):process_request(store,grant,'test-key','123',client,owner,data)
