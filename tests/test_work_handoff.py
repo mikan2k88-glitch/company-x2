@@ -1,7 +1,12 @@
 import unittest
+import tempfile
+from pathlib import Path
 from company_x2.autonomy import FREE, AI
 from company_x2.work_handoff import verified_contact, recheck_contact, invited_contact
 from company_x2.intake_access import issue
+from company_x2.work_handoff import bind_request
+from company_x2 import template_customer
+from company_x2.store import Store
 
 
 class HandoffTests(unittest.TestCase):
@@ -45,3 +50,18 @@ class HandoffTests(unittest.TestCase):
         expired,_=issue('test-key',now=1,contact_id=self.row['id'])
         for invalid in (other,unbound,expired,grant+'tampered'):
             with self.assertRaises(ValueError):invited_contact(self.store,invalid,'test-key','123',client)
+
+    def test_binding_requires_reserved_owner_plan_and_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store=Store(Path(tmp)/'db');store.outreach_rpc=lambda action:[self.row]
+            client=type('Client',(),{'observe':lambda _,contact:dict(id=contact['id'],reply_id='123',reply_text=FREE+' '+AI)})()
+            data=dict(request_key='handoff-request-001',purpose='Prepare template',csv='sku\n001\n',
+                columns=['SKU'],mapping={'SKU':'sku'},risk_context=dict(sensitive_data='no',critical_use='no',extra_liability='no'))
+            owner='a'*40;template_customer.request(store,data,owner)
+            grant,_=issue('test-key',contact_id=self.row['id'])
+            for _ in range(2):
+                self.assertEqual(bind_request(store,grant,'test-key','123',client,owner,data['request_key'])['status'],'awaiting_plan_consent')
+            with self.assertRaises(ValueError):bind_request(store,grant,'test-key','123',client,'b'*40,data['request_key'])
+            record=template_customer.OwnedStore(store,owner).opportunities()[0]
+            self.assertEqual(record['handoff']['reply_id'],'123')
+            self.assertNotIn('handoff',template_customer.status(store,owner)['items'][0])

@@ -43,3 +43,20 @@ def invited_contact(store, grant, signing_key, reply_id, client):
     if not contact_id:
         raise ValueError('Valid contact-bound invitation required')
     return recheck_contact(store, contact_id, reply_id, client)
+
+
+def bind_request(store, grant, signing_key, reply_id, client, owner, request_key):
+    """Bind a previously reserved owner-scoped plan; this does not execute it."""
+    from . import template_customer, template_session, public_intake
+    manifest = invited_contact(store, grant, signing_key, reply_id, client)
+    scoped = template_customer.OwnedStore(store, owner)
+    binding = {key: manifest[key] for key in ('contact_id', 'reply_id', 'consent_sha256')}
+    with public_intake.LOCK, template_session.LOCK:
+        record = next((r for r in scoped.opportunities() if r['external_id'] == request_key), None)
+        if not record or record['status'] != 'awaiting_consent':
+            raise ValueError('Reserved owner-scoped plan required')
+        if record.get('handoff') and record['handoff'] != binding:
+            raise ValueError('Request already bound to a different source reply')
+        record['handoff'] = binding
+        template_session.save(scoped, record)
+    return {'status': 'awaiting_plan_consent', 'external_delivery_allowed': False}
