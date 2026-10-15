@@ -26,9 +26,10 @@ class HandoffTests(unittest.TestCase):
 
     def test_live_recheck_fails_closed_on_missing_changed_and_revoked_reply(self):
         client=type('Client',(),{})()
-        for observed in (None, {'reply_id':'124','reply_text':FREE+' '+AI},
-                         {'reply_id':'123','reply_text':'Consent withdrawn'}):
+        for observed in (None, {'id':self.row['id'],'reply_id':'124','reply_text':FREE+' '+AI},
+                         {'id':self.row['id'],'reply_id':'123','reply_text':'Consent withdrawn'},
+                         {'id':'ot_'+'b'*32,'reply_id':'123','reply_text':FREE+' '+AI}):
             client.observe=lambda contact:observed
             with self.assertRaises(ValueError):recheck_contact(self.store,self.row['id'],'123',client)
-        client.observe=lambda contact:{'reply_id':'123','reply_text':FREE+' '+AI}
+        client.observe=lambda contact:{'id':self.row['id'],'reply_id':'123','reply_text':FREE+' '+AI}
         self.assertTrue(recheck_contact(self.store,self.row['id'],'123',client)['source_rechecked'])

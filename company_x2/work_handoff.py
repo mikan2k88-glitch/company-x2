@@ -28,7 +28,8 @@ def recheck_contact(store, contact_id, reply_id, client):
     manifest = verified_contact(store, contact_id, reply_id)
     contact = next(item for item in store.outreach_rpc('list') if item['id'] == contact_id)
     observed = client.observe(contact)
-    if not isinstance(observed, dict) or str(observed.get('reply_id')) != reply_id:
+    if (not isinstance(observed, dict) or observed.get('id') != contact_id
+            or str(observed.get('reply_id')) != reply_id):
         raise ValueError('Current source reply unavailable or changed')
     if not consent(observed.get('reply_text'))['accepted']:
         raise ValueError('Current source consent withdrawn or changed')
