@@ -59,6 +59,7 @@ class HandoffTests(unittest.TestCase):
                 columns=['SKU'],mapping={'SKU':'sku'},risk_context=dict(sensitive_data='no',critical_use='no',extra_liability='no'))
             owner='a'*40;template_customer.request(store,data,owner)
             grant,_=issue('test-key',contact_id=self.row['id'])
+            with self.assertRaises(ValueError):process_request(store,grant,'test-key','123',client,owner,data)
             for _ in range(2):
                 self.assertEqual(bind_request(store,grant,'test-key','123',client,owner,data['request_key'])['status'],'awaiting_plan_consent')
             with self.assertRaises(ValueError):bind_request(store,grant,'test-key','123',client,'b'*40,data['request_key'])
