@@ -107,7 +107,7 @@ def request(store, data, owner):
         return public_record(result)
 
 
-def process(store, data, owner):
+def process(store, data, owner, *, handoff_check=None):
     # A received artifact may be reproduced from resubmitted input only when
     # its stored consent and artifact hashes match. The saved status stays received.
     scoped = OwnedStore(store, owner, replay_received=True)
@@ -115,6 +115,12 @@ def process(store, data, owner):
         from .free_trial import require_open
         existing = next((r for r in scoped.opportunities()
                          if r['external_id'] == data.get('request_key')), None)
+        if existing and existing.get('handoff'):
+            if handoff_check is None:
+                raise ValueError('Verified source handoff required')
+            evidence = handoff_check()
+            if any(evidence.get(key) != value for key, value in existing['handoff'].items()):
+                raise ValueError('Source handoff changed')
         if not existing or existing['status'] != 'ready':
             require_open(store)  # Existing verified artifact retrieval stays available.
         return template_session.process(scoped, data)

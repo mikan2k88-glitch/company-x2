@@ -3,6 +3,7 @@ import hashlib
 import re
 
 from .autonomy import consent
+from .intake_access import contact_claim
 
 
 def verified_contact(store, contact_id, reply_id):
@@ -34,3 +35,38 @@ def recheck_contact(store, contact_id, reply_id, client):
     if not consent(observed.get('reply_text'))['accepted']:
         raise ValueError('Current source consent withdrawn or changed')
     return {**manifest, 'source_rechecked': True}
+
+
+def invited_contact(store, grant, signing_key, reply_id, client):
+    """Derive contact identity from the verified invitation, never request JSON."""
+    contact_id = contact_claim(grant, signing_key)
+    if not contact_id:
+        raise ValueError('Valid contact-bound invitation required')
+    return recheck_contact(store, contact_id, reply_id, client)
+
+
+def bind_request(store, grant, signing_key, reply_id, client, owner, request_key):
+    """Bind a previously reserved owner-scoped plan; this does not execute it."""
+    from . import template_customer, template_session, public_intake
+    manifest = invited_contact(store, grant, signing_key, reply_id, client)
+    scoped = template_customer.OwnedStore(store, owner)
+    binding = {key: manifest[key] for key in ('contact_id', 'reply_id', 'consent_sha256')}
+    with public_intake.LOCK, template_session.LOCK:
+        record = next((r for r in scoped.opportunities() if r['external_id'] == request_key), None)
+        if not record or record['status'] != 'awaiting_consent':
+            raise ValueError('Reserved owner-scoped plan required')
+        if record.get('handoff') and record['handoff'] != binding:
+            raise ValueError('Request already bound to a different source reply')
+        record['handoff'] = binding
+        template_session.save(scoped, record)
+    return {'status': 'awaiting_plan_consent', 'external_delivery_allowed': False}
+
+
+def process_request(store, grant, signing_key, reply_id, client, owner, data):
+    from . import template_customer
+    record = next((r for r in template_customer.OwnedStore(store, owner).opportunities()
+                   if r['external_id'] == data.get('request_key')), None)
+    if not record or not record.get('handoff'):
+        raise ValueError('Bound source handoff required')
+    return template_customer.process(store, data, owner,
+        handoff_check=lambda: invited_contact(store, grant, signing_key, reply_id, client))

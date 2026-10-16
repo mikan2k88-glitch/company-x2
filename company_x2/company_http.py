@@ -102,14 +102,24 @@ def get_route(handler, path, store, ai, payments, scout_enabled):
 
 
 def post_route(handler, path, data, store, ai, payments):
-    if path in ('/api/intake/template/suggest','/api/intake/template/plan','/api/intake/template/request',
+    if path in ('/api/intake/template/bind','/api/intake/template/suggest','/api/intake/template/plan','/api/intake/template/request',
                 '/api/intake/template/process','/api/intake/template/receive'):
         if not getattr(handler,'public_customer',False):
             handler.respond(403,{'error':'Free customer access required'})
             return True
         from . import template_customer
         action = path.rsplit('/',1)[1]
-        if action == 'suggest':
+        invitation=handler.headers.get('X-Work-Invitation','')
+        if action == 'bind' or (action == 'process' and invitation):
+            from .work_handoff import bind_request, process_request
+            from .outreach import GitHubContact
+            if action == 'bind':
+                result=bind_request(store,invitation,handler.intake_signing_key,data.get('reply_id'),
+                    GitHubContact(),handler.token(),data.get('request_key'))
+            else:
+                result=process_request(store,invitation,handler.intake_signing_key,data.get('reply_id'),
+                    GitHubContact(),handler.token(),data)
+        elif action == 'suggest':
             result = template_customer.suggestion(store,data,handler.token())
         elif action == 'plan':
             result = template_customer.preview(store,data,handler.token())

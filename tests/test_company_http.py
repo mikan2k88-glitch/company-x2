@@ -7,6 +7,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
@@ -19,6 +20,31 @@ from company_x2.store import Store
 
 
 class CompanyHTTPTests(unittest.TestCase):
+    def test_invited_template_http_rechecks_and_blocks_bypass(self):
+        from company_x2.intake_access import public_issue, issue
+        from company_x2.autonomy import FREE, AI
+        contact='ot_'+'a'*32
+        row=dict(id=contact,status='sent',reply_id='123',reply_text=FREE+' '+AI)
+        client=type('Client',(),{'observe':lambda _,item:dict(id=contact,reply_id='123',reply_text=row['reply_text'])})()
+        grant,_=public_issue('password','t'*32)
+        invitation,_=issue('password',contact_id=contact)
+        headers={'X-Intake-Access':grant,'X-Work-Invitation':invitation}
+        data=dict(request_key='invited-http-001',purpose='Prepare product template',csv='sku\n001\n',
+            columns=['SKU'],mapping={'SKU':'sku'},risk_context=dict(sensitive_data='no',critical_use='no',extra_liability='no'))
+        record=self.call('/api/intake/template/request',data,auth=False,headers=headers)
+        with patch.object(self.store,'outreach_rpc',return_value=[row]),patch('company_x2.outreach.GitHubContact',return_value=client):
+            with self.assertRaises(urllib.error.HTTPError):
+                self.call('/api/intake/template/bind',dict(request_key=data['request_key'],reply_id='123'),
+                    auth=False,headers={'X-Intake-Access':grant})
+            self.call('/api/intake/template/bind',dict(request_key=data['request_key'],reply_id='123'),auth=False,headers=headers)
+            data.update(accepted=True,approval_sha256=record['approval_sha256'],reply_id='123')
+            with self.assertRaises(urllib.error.HTTPError):
+                self.call('/api/intake/template/process',data,auth=False,headers={'X-Intake-Access':grant})
+            self.assertIn('001',self.call('/api/intake/template/process',data,auth=False,headers=headers)['csv'])
+            row['reply_text']='Consent withdrawn'
+            with self.assertRaises(urllib.error.HTTPError):
+                self.call('/api/intake/template/process',data,auth=False,headers=headers)
+
     def test_customer_template_private_workflow(self):
         page=self.call('/template-intake',auth=False,decode=False)
         self.assertIn(b'/api/intake/template/',page)
