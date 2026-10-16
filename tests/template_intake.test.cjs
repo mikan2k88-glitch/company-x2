@@ -8,12 +8,12 @@ const controls=['purpose','source','template','columns','mapping','required','sc
 Object.assign(elements.purpose,{value:'Prepare product file'});
 Object.assign(elements.source,{value:'sku\n001\n'});
 elements.columns.value='["SKU"]';elements.mapping.value='{"SKU":"sku"}';elements.required.value='[]';elements.scope.checked=true;
-let calls=[],release,deny=false;
-const context={crypto:{randomUUID:()=> 'synthetic-request-001'},sessionStorage:{getItem:()=>null,setItem(){}},
+let calls=[],release,deny=false,requests=[];
+const context={URLSearchParams,location:{hash:''},crypto:{randomUUID:()=> 'synthetic-request-001'},sessionStorage:{getItem:()=>null,setItem(){}},
  Blob,URL:{createObjectURL:()=> 'blob:synthetic',revokeObjectURL(){}},
  document:{getElementById:id=>elements[id],body:{setAttribute(){}},
  querySelectorAll:s=>s==='button'?buttons:controls,createElement:()=>({append(){}}),createTextNode:s=>s},
- fetch:async(path,options)=>{calls.push(path);if(deny)return {ok:false,json:async()=>({error:'Access expired'})};if(path==='/api/public/start')await new Promise(r=>release=r);
+ fetch:async(path,options)=>{calls.push(path);requests.push({path,options});if(deny)return {ok:false,json:async()=>({error:'Access expired'})};if(path==='/api/public/start')await new Promise(r=>release=r);
  let data=path.endsWith('/status')?{items:[{request_key:'synthetic-request-001',status:'received',approval_sha256:'plan-hash'}]}:
  path==='/api/public/start'?{access:'synthetic-grant'}:
  path.endsWith('/plan')?{approval_sha256:'plan-hash',plan:{questions:[]}}:
@@ -43,5 +43,20 @@ vm.runInNewContext(html.split('<script>')[1].split('</script>')[0],context);
  });
  await elements.start.onclick();assert.equal(calls.length,count);
  assert.match(elements.result.textContent,/Session storage unavailable/);
+ deny=false;
+ vm.runInNewContext(html.split('<script>')[1].split('</script>')[0],{
+  ...context,location:{hash:'#work_invitation=synthetic-invitation&reply_id=123'}
+ });
+ const invitedStart=elements.start.onclick();await Promise.resolve();release();await invitedStart;
+ await elements.plan.onclick();assert.equal(requests.at(-1).path,'/api/intake/template/bind');
+ assert.equal(requests.at(-1).options.headers['X-Work-Invitation'],'synthetic-invitation');
+ assert.equal(requests.at(-1).options.headers['X-Intake-Access'],'synthetic-grant');
+ assert.equal(JSON.parse(requests.at(-1).options.body).reply_id,'123');
+ elements.consent.checked=true;await elements.execute.onclick();
+ assert.equal(requests.at(-1).path,'/api/intake/template/process');
+ const beforeInvalid=calls.length;
+ vm.runInNewContext(html.split('<script>')[1].split('</script>')[0],{...context,location:{hash:'#reply_id=123'}});
+ await elements.plan.onclick();assert.equal(calls.length,beforeInvalid);
+ assert.match(elements.result.textContent,/Valid invitation reply required/);
  console.log('Synthetic UI flow and concurrent-click guard passed');
 })().catch(e=>{console.error(e);process.exitCode=1});
