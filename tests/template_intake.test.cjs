@@ -9,7 +9,7 @@ Object.assign(elements.purpose,{value:'Prepare product file'});
 Object.assign(elements.source,{value:'sku\n001\n'});
 elements.columns.value='["SKU"]';elements.mapping.value='{"SKU":"sku"}';elements.required.value='[]';elements.scope.checked=true;
 let calls=[],release,deny=false;
-const context={crypto:{randomUUID:()=> 'synthetic-request-001'},sessionStorage:{getItem:()=>null,setItem(){}},
+const context={URLSearchParams,location:{hash:''},crypto:{randomUUID:()=> 'synthetic-request-001'},sessionStorage:{getItem:()=>null,setItem(){}},
  Blob,URL:{createObjectURL:()=> 'blob:synthetic',revokeObjectURL(){}},
  document:{getElementById:id=>elements[id],body:{setAttribute(){}},
  querySelectorAll:s=>s==='button'?buttons:controls,createElement:()=>({append(){}}),createTextNode:s=>s},
