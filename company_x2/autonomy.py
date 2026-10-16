@@ -18,6 +18,8 @@ def invitation_grant(body, reply_id):
     links=re.findall(r'https://company-x2\.onrender\.com/[^\s]+',body)
     if len(links)!=1:raise ValueError('Exactly one invitation required')
     url=urlparse(links[0]);params=parse_qs(url.fragment)
+    if url.scheme!='https' or url.netloc!='company-x2.onrender.com' or url.query:
+        raise ValueError('Fixed invitation origin required')
     if url.path=='/intake' and set(params)=={'access'}:
         values=params['access']
     elif url.path=='/template-intake' and set(params)=={'work_invitation','reply_id'}:

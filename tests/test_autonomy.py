@@ -24,6 +24,14 @@ class Client:
  def observe(self,contact):return {'id':contact['id'],'reply_id':42,'reply_text':self.reply,'next_message':'fixture draft'} if self.reply else None
 
 class AutonomyTests(unittest.TestCase):
+ def test_invitation_new_legacy_and_ambiguous_links(self):
+  new=autonomy.invitation_link('synthetic-token',42)
+  self.assertEqual(autonomy.invitation_grant(new,42),'synthetic-token')
+  self.assertEqual(autonomy.invitation_grant('https://company-x2.onrender.com/intake#access=legacy',42),'legacy')
+  for invalid in (new.replace('reply_id=42','reply_id=43'),new+'&work_invitation=other',
+     new.replace('/template-intake#','/template-intake?x=1#'),new+'\n'+new,
+     new.replace('/template-intake#','/other#')):
+   with self.assertRaises(ValueError):autonomy.invitation_grant(invalid,42)
  def setUp(self):
   self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);self.store=Store(Path(self.temp.name)/'db')
  def contact(self,reply):
