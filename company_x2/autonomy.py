@@ -1,12 +1,31 @@
 """Conservative acquisition-to-intake coordinator. Listing text is never a command."""
 import hashlib,math,os,re
 from datetime import datetime,timezone
-from urllib.parse import urlencode,parse_qs
+from urllib.parse import urlencode,parse_qs,urlparse
 from . import outreach
 from .intake_access import issue as invite,valid as valid_invite,contact_claim
 
 FREE='[company-x2: free verification accepted]'
 AI='[company-x2: AI processing allowed]'
+
+
+def invitation_link(grant, reply_id):
+    return 'https://company-x2.onrender.com/template-intake#'+urlencode(
+        {'work_invitation':grant,'reply_id':str(reply_id)})
+
+
+def invitation_grant(body, reply_id):
+    links=re.findall(r'https://company-x2\.onrender\.com/[^\s]+',body)
+    if len(links)!=1:raise ValueError('Exactly one invitation required')
+    url=urlparse(links[0]);params=parse_qs(url.fragment)
+    if url.path=='/intake' and set(params)=={'access'}:
+        values=params['access']
+    elif url.path=='/template-intake' and set(params)=={'work_invitation','reply_id'}:
+        if params['reply_id']!=[str(reply_id)]:raise ValueError('Invitation reply mismatch')
+        values=params['work_invitation']
+    else:raise ValueError('Unsupported invitation URL')
+    if len(values)!=1:raise ValueError('Ambiguous invitation')
+    return values[0]
 
 def consent(text):
     text=text if isinstance(text,str) else ''
@@ -115,7 +134,7 @@ def cycle(store,env=None,client=None,signing_key=None,now=None):
             decision=consent(contact.get('reply_text'))
             if decision['accepted'] and signing_key:
                 grant,_=invite(signing_key,contact_id=contact['id'])
-                body='Company X2 automated free verification invitation. No paid job or deadline is accepted. Confirm the work plan before processing.\nhttps://company-x2.onrender.com/intake#'+urlencode({'access':grant})
+                body='Company X2 automated free verification invitation. No paid job or deadline is accepted. Confirm the work plan before processing.\n'+invitation_link(grant,contact['reply_id'])
                 store.autonomy_rpc('prepare_message',{'contact_id':contact['id'],'reply_id':contact['reply_id'],'body':body})
                 report['followups_prepared']+=1
             elif contact.get('reply_text'):report['held']+=1
@@ -126,8 +145,7 @@ def cycle(store,env=None,client=None,signing_key=None,now=None):
             message=store.autonomy_rpc('claim_message')
             if message:
                 try:
-                    fragment=message['body'].split('https://company-x2.onrender.com/intake#',1)[1]
-                    grant=parse_qs(fragment).get('access',[''])[0]
+                    grant=invitation_grant(message['body'],message['reply_id'])
                     if not signing_key or not valid_invite(grant,signing_key) or contact_claim(grant,signing_key)!=message['contact_id']:raise ValueError('Invitation expired or invalid')
                     contact=next(x for x in store.outreach_rpc('list') if x['id']==message['contact_id'])
                     observed=client.observe(contact)
