@@ -1,0 +1,70 @@
+import hashlib
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+from company_x2.delivery_journal import Journal
+from company_x2.delivery_experiment import deliver_once
+
+
+class DeliveryTests(unittest.TestCase):
+    def test_bad_acknowledgements_and_adapter_errors_are_not_retried(self):
+        for response in (None,dict(id='receipt',destination='wrong',artifact_sha256='wrong'),
+                         dict(destination='fixed-target',artifact_sha256=hashlib.sha256(b'x').hexdigest()),
+                         RuntimeError('Synthetic connection lost')):
+            with self.subTest(response=type(response).__name__),tempfile.TemporaryDirectory() as tmp:
+                journal=Journal(Path(tmp)/'journal');calls=[]
+                def send(destination,artifact):
+                    calls.append(destination)
+                    if isinstance(response,Exception):raise response
+                    return response
+                adapter=type('SyntheticSite',(),{'send':staticmethod(send)})()
+                args=dict(contact='contact',reply='reply',plan='plan',destination='fixed-target',artifact=b'x',approved_sha256=hashlib.sha256(b'x').hexdigest(),
+                    adapter=adapter,authorize=lambda:True)
+                with self.assertRaises((ValueError,RuntimeError)):deliver_once(journal,**args)
+                self.assertEqual(deliver_once(journal,**args)['state'],'uncertain')
+                self.assertEqual(len(calls),1)
+
+    def test_receipt_storage_failure_holds_claim_after_send(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            journal=Journal(Path(tmp)/'journal');calls=[]
+            def send(destination,artifact):
+                calls.append(destination)
+                return dict(id='receipt',destination=destination,artifact_sha256=hashlib.sha256(artifact).hexdigest())
+            args=dict(contact='contact',reply='reply',plan='plan',destination='fixed-target',artifact=b'x',approved_sha256=hashlib.sha256(b'x').hexdigest(),
+                adapter=type('SyntheticSite',(),{'send':staticmethod(send)})(),authorize=lambda:True)
+            with patch.object(journal,'finish',side_effect=RuntimeError('Synthetic database unavailable')):
+                with self.assertRaises(RuntimeError):deliver_once(journal,**args)
+            self.assertEqual(deliver_once(journal,**args)['state'],'sending')
+            self.assertEqual(len(calls),1)
+
+    def test_crash_after_send_restart_never_sends_again(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'journal';journal=Journal(path);sends=[]
+            def send(destination,artifact):
+                sends.append(destination)
+                raise KeyboardInterrupt('Synthetic crash after click')
+            adapter=type('SyntheticSite',(),{'send':staticmethod(send)})()
+            args=dict(contact='contact',reply='reply',plan='plan',destination='fixed-target',
+                artifact=b'sku\n001\n',approved_sha256=hashlib.sha256(b'sku\n001\n').hexdigest(),adapter=adapter,authorize=lambda:True)
+            with self.assertRaises(KeyboardInterrupt):deliver_once(journal,**args)
+            self.assertEqual(deliver_once(Journal(path),**args)['state'],'sending')
+            self.assertEqual(len(sends),1)
+
+    def test_verified_acknowledgement_and_stop_before_send(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            journal=Journal(Path(tmp)/'journal');sends=[]
+            def send(destination,artifact):
+                sends.append(destination)
+                return dict(id='synthetic-receipt',destination=destination,artifact_sha256=hashlib.sha256(artifact).hexdigest())
+            adapter=type('SyntheticSite',(),{'send':staticmethod(send)})()
+            args=dict(contact='contact',reply='reply',plan='plan',destination='fixed-target',artifact=b'sku\n001\n',approved_sha256=hashlib.sha256(b'sku\n001\n').hexdigest(),adapter=adapter)
+            with self.assertRaises(ValueError):deliver_once(journal,**{**args,'approved_sha256':'wrong'},authorize=lambda:True)
+            self.assertFalse(sends)
+            checks=iter([True,False])
+            with self.assertRaises(ValueError):deliver_once(journal,**args,authorize=lambda:next(checks))
+            self.assertFalse(sends)
+            self.assertEqual(deliver_once(journal,**args,authorize=lambda:True)['state'],'uncertain')
+            args['destination']='second-fixed-target'
+            self.assertEqual(deliver_once(journal,**args,authorize=lambda:True)['state'],'confirmed')
+            self.assertEqual(len(sends),1)
