@@ -3,10 +3,12 @@ import hashlib
 from .delivery_journal import identity
 
 
-def deliver_once(journal, *, contact, reply, plan, destination, artifact, adapter, authorize):
+def deliver_once(journal, *, contact, reply, plan, destination, artifact, approved_sha256, adapter, authorize):
     if not isinstance(artifact,bytes) or not 0<len(artifact)<=50000:
         raise ValueError('Bounded verified artifact bytes required')
     digest=hashlib.sha256(artifact).hexdigest()
+    if approved_sha256!=digest:
+        raise ValueError('Artifact differs from approved inspection evidence')
     key=identity(contact,reply,plan,digest,destination)
     if authorize() is not True:raise ValueError('Delivery stopped')
     lease=journal.claim(key,allowed=True)

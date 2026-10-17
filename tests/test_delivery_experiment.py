@@ -19,7 +19,7 @@ class DeliveryTests(unittest.TestCase):
                     if isinstance(response,Exception):raise response
                     return response
                 adapter=type('SyntheticSite',(),{'send':staticmethod(send)})()
-                args=dict(contact='contact',reply='reply',plan='plan',destination='fixed-target',artifact=b'x',
+                args=dict(contact='contact',reply='reply',plan='plan',destination='fixed-target',artifact=b'x',approved_sha256=hashlib.sha256(b'x').hexdigest(),
                     adapter=adapter,authorize=lambda:True)
                 with self.assertRaises((ValueError,RuntimeError)):deliver_once(journal,**args)
                 self.assertEqual(deliver_once(journal,**args)['state'],'uncertain')
@@ -31,7 +31,7 @@ class DeliveryTests(unittest.TestCase):
             def send(destination,artifact):
                 calls.append(destination)
                 return dict(id='receipt',destination=destination,artifact_sha256=hashlib.sha256(artifact).hexdigest())
-            args=dict(contact='contact',reply='reply',plan='plan',destination='fixed-target',artifact=b'x',
+            args=dict(contact='contact',reply='reply',plan='plan',destination='fixed-target',artifact=b'x',approved_sha256=hashlib.sha256(b'x').hexdigest(),
                 adapter=type('SyntheticSite',(),{'send':staticmethod(send)})(),authorize=lambda:True)
             with patch.object(journal,'finish',side_effect=RuntimeError('Synthetic database unavailable')):
                 with self.assertRaises(RuntimeError):deliver_once(journal,**args)
@@ -46,7 +46,7 @@ class DeliveryTests(unittest.TestCase):
                 raise KeyboardInterrupt('Synthetic crash after click')
             adapter=type('SyntheticSite',(),{'send':staticmethod(send)})()
             args=dict(contact='contact',reply='reply',plan='plan',destination='fixed-target',
-                artifact=b'sku\n001\n',adapter=adapter,authorize=lambda:True)
+                artifact=b'sku\n001\n',approved_sha256=hashlib.sha256(b'sku\n001\n').hexdigest(),adapter=adapter,authorize=lambda:True)
             with self.assertRaises(KeyboardInterrupt):deliver_once(journal,**args)
             self.assertEqual(deliver_once(Journal(path),**args)['state'],'sending')
             self.assertEqual(len(sends),1)
@@ -58,7 +58,9 @@ class DeliveryTests(unittest.TestCase):
                 sends.append(destination)
                 return dict(id='synthetic-receipt',destination=destination,artifact_sha256=hashlib.sha256(artifact).hexdigest())
             adapter=type('SyntheticSite',(),{'send':staticmethod(send)})()
-            args=dict(contact='contact',reply='reply',plan='plan',destination='fixed-target',artifact=b'sku\n001\n',adapter=adapter)
+            args=dict(contact='contact',reply='reply',plan='plan',destination='fixed-target',artifact=b'sku\n001\n',approved_sha256=hashlib.sha256(b'sku\n001\n').hexdigest(),adapter=adapter)
+            with self.assertRaises(ValueError):deliver_once(journal,**{**args,'approved_sha256':'wrong'},authorize=lambda:True)
+            self.assertFalse(sends)
             checks=iter([True,False])
             with self.assertRaises(ValueError):deliver_once(journal,**args,authorize=lambda:next(checks))
             self.assertFalse(sends)
