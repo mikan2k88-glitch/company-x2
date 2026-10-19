@@ -15,3 +15,12 @@ class CloudContractTests(unittest.TestCase):
     def test_ambiguous_finish_and_leaked_state_are_rejected(self):
         with self.assertRaises(ValueError):CloudJournal(lambda a,d:None).finish('a'*64,'b'*64)
         with self.assertRaises(ValueError):CloudJournal(lambda a,d:{'state':'sending','has_receipt':False,'lease':'secret'}).state('a'*64)
+
+    def test_invalid_input_and_receipt_state_mismatch_fail_closed(self):
+        calls=[];journal=CloudJournal(lambda a,d:calls.append(a))
+        for invalid in ('',None,'wrong'):
+            with self.assertRaises(ValueError):journal.state(invalid)
+            with self.assertRaises(ValueError):journal.finish('a'*64,invalid)
+        self.assertFalse(calls)
+        for state,receipt in (('confirmed',False),('sending',True),('uncertain',True)):
+            with self.assertRaises(ValueError):CloudJournal(lambda a,d:{'state':state,'has_receipt':receipt}).state('a'*64)
