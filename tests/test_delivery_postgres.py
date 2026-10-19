@@ -4,6 +4,8 @@ import shutil
 import subprocess
 import unittest
 import uuid
+import json
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse
 
@@ -37,3 +39,21 @@ class DeliveryPostgresTests(unittest.TestCase):
             self.assertIn('UPDATE 0',self.sql(f"UPDATE {table} SET state='confirmed' WHERE id='fixed-key' AND lease='{winner}' AND state='sending'"))
         finally:
             self.sql(f'DROP TABLE {table}')
+
+    def test_rpc_contract_and_digest_only_lease_storage(self):
+        schema='delivery_rpc_'+uuid.uuid4().hex
+        fixture=(Path(__file__).parent/'fixtures'/'delivery_rpc.sql').read_text()
+        self.sql(fixture.replace('__SCHEMA__',schema))
+        def rpc(action,payload):
+            raw=self.sql(f"SELECT {schema}.journal('{action}','{json.dumps(payload)}'::jsonb)")
+            return json.loads(raw) if raw else None
+        try:
+            from company_x2.cloud_delivery_journal import CloudJournal
+            journal=CloudJournal(rpc);key='a'*64
+            lease=journal.claim(key,allowed=True)
+            self.assertIsNone(journal.claim(key,allowed=True))
+            with self.assertRaises(ValueError):journal.finish(key,'b'*64,'receipt')
+            journal.finish(key,lease,'synthetic-receipt')
+            self.assertEqual(journal.state(key),{'state':'confirmed','has_receipt':True})
+            self.assertNotIn(lease,self.sql(f'SELECT lease_hash FROM {schema}.claims'))
+        finally:self.sql(f'DROP SCHEMA {schema} CASCADE')
