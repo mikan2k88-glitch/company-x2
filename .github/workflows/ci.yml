@@ -3,6 +3,22 @@ on: [push, pull_request]
 permissions:
   contents: read
 jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm install --prefix tests/browser-runtime --no-save --ignore-scripts playwright@1.62.1
+      - run: node tests/browser-runtime/node_modules/playwright/cli.js install --with-deps chromium-headless-shell
+      - run: node tests/browser_delivery_fixture.cjs
+        env:
+          NODE_PATH: ./tests/browser-runtime/node_modules
   test:
     runs-on: ubuntu-latest
     steps:
