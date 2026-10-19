@@ -50,6 +50,19 @@ class DeliveryPostgresTests(unittest.TestCase):
         try:
             from company_x2.cloud_delivery_journal import CloudJournal
             journal=CloudJournal(rpc);key='a'*64
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                leases=list(pool.map(lambda _:journal.claim('c'*64,allowed=True),range(2)))
+            self.assertEqual(sum(lease is not None for lease in leases),1)
+            role='delivery_guest_'+uuid.uuid4().hex
+            self.sql(f'CREATE ROLE {role}; GRANT USAGE ON SCHEMA {schema} TO {role}')
+            try:
+                denied=subprocess.run(['psql',DSN,'-X','-v','ON_ERROR_STOP=1','-c',
+                    f"SET ROLE {role}; SELECT {schema}.journal('state','{{\"identity\":\"{'a'*64}\"}}'::jsonb)"],
+                    capture_output=True,text=True)
+                self.assertNotEqual(denied.returncode,0)
+                self.assertIn('permission denied',denied.stderr)
+            finally:
+                self.sql(f'REVOKE USAGE ON SCHEMA {schema} FROM {role}; DROP ROLE {role}')
             lease=journal.claim(key,allowed=True)
             self.assertIsNone(journal.claim(key,allowed=True))
             with self.assertRaises(ValueError):journal.finish(key,'b'*64,'receipt')
