@@ -5,7 +5,14 @@ const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{spa
 const journalDirectory=fs.mkdtempSync(path.join(os.tmpdir(),'cx2-browser-delivery-'));
 const journalPath=path.join(journalDirectory,'journal.db');
 const journalKey=crypto.createHash('sha256').update('synthetic-fixed-delivery').digest('hex');
+const postgres=process.env.CX2_BROWSER_POSTGRES==='1';
+const journalSchema='browser_delivery_'+crypto.randomUUID().replaceAll('-','');let schemaReady=false;
+function postgresAction(action){
+ const result=spawnSync(process.env.PYTHON||'python',['tests/browser_postgres_helper.py',journalSchema,action,journalKey],{encoding:'utf8'});
+ assert.equal(result.status,0,result.stderr);return result.stdout;
+}
 function claim(){
+ if(postgres){if(!schemaReady){postgresAction('init');schemaReady=true;}return JSON.parse(postgresAction('claim'));}
  const script='import sys,json;from company_x2.delivery_journal import Journal;print(json.dumps(Journal(sys.argv[1]).claim(sys.argv[2],allowed=True)))';
  const result=spawnSync(process.env.PYTHON||'python',['-c',script,journalPath,journalKey],{encoding:'utf8'});
  assert.equal(result.status,0,result.stderr);return JSON.parse(result.stdout);
@@ -51,5 +58,6 @@ const server=http.createServer(async(req,res)=>{
   assert.equal(sends,1); // Coordinator must not perform a second click.
   console.log('Synthetic Chromium delivery and durable restart guard passed; no external site used');
  }finally{if(browser)await browser.close();await new Promise(resolve=>server.close(resolve));
+  if(schemaReady)postgresAction('drop');
   if(fs.existsSync(journalPath))fs.unlinkSync(journalPath);fs.rmdirSync(journalDirectory);}
 })().catch(error=>{console.error(error.message);process.exitCode=1});
