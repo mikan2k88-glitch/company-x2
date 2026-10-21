@@ -45,6 +45,8 @@ class PermissionTests(unittest.TestCase):
         for key in current:
             with self.assertRaises(ValueError):require_delivery_permission(permit,{**current,key:'changed'},stopped=False,now=now)
         for changed in (replace(permit,expires_at=now),replace(permit,policy_evidence=''),
+                        replace(permit,expires_at=None),replace(permit,artifact_sha256=None),
+                        replace(permit,contact_id=''),replace(permit,origin='https://synthetic.invalid:bad'),
                         replace(permit,destination='https://other.invalid/orders/1'),
                         replace(permit,destination='https://synthetic.invalid/orders/1#other')):
             with self.assertRaises(ValueError):require_delivery_permission(changed,current,stopped=False,now=now)

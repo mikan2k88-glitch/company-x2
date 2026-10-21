@@ -21,10 +21,19 @@ def require_delivery_permission(permit, current, *, stopped=True, now=None):
     """Match trusted current verification evidence; default denies all sends."""
     if stopped is not False:raise ValueError('External delivery stopped')
     now=now or datetime.now(timezone.utc)
-    if (not isinstance(permit,Permit) or permit.expires_at.tzinfo is None
+    if (not isinstance(permit,Permit) or not isinstance(permit.expires_at,datetime)
+            or permit.expires_at.tzinfo is None
             or now.tzinfo is None or now>=permit.expires_at or not permit.policy_evidence):
         raise ValueError('Current operator permission required')
+    if not isinstance(current,dict):raise ValueError('Trusted current evidence required')
+    if any(not isinstance(getattr(permit,name),str) or not getattr(permit,name)
+           for name in ('origin','destination','contact_id','reply_id','plan_sha256','artifact_sha256','policy_evidence')):
+        raise ValueError('Complete operator scope required')
     origin=urlsplit(permit.origin);destination=urlsplit(permit.destination)
+    try:
+        if origin.port not in (None,443) or destination.port not in (None,443):
+            raise ValueError('HTTPS port required')
+    except ValueError:raise ValueError('Invalid delivery port') from None
     if (origin.scheme!='https' or not origin.hostname or origin.username or origin.password
             or origin.path or origin.query or origin.fragment
             or destination.scheme!='https' or destination.netloc!=origin.netloc
