@@ -38,3 +38,15 @@ def require_delivery_permission(permit, current, *, stopped=True, now=None):
             or current.get('plan_accepted') is not True):
         raise ValueError('Current consent and artifact inspection required')
     return True
+
+
+def deliver_permitted(journal,permit,artifact,adapter,verify_current,*,is_stopped=lambda:True):
+    """Internal coordinator; all targets derive from operator-owned scope."""
+    from .delivery_experiment import deliver_once
+    def authorize():
+        return require_delivery_permission(permit,verify_current(),stopped=is_stopped())
+    # Validate before reading fields; a malformed permit cannot fall back.
+    authorize()
+    return deliver_once(journal,contact=permit.contact_id,reply=permit.reply_id,
+        plan=permit.plan_sha256,destination=permit.destination,artifact=artifact,
+        approved_sha256=permit.artifact_sha256,adapter=adapter,authorize=authorize)
