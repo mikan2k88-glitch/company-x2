@@ -7,6 +7,7 @@ from company_x2.intake_access import issue
 from company_x2.work_handoff import bind_request, process_request
 from company_x2 import template_customer
 from company_x2.store import Store
+from company_x2.delivery_evidence import prepare_delivery
 
 
 class HandoffTests(unittest.TestCase):
@@ -70,5 +71,13 @@ class HandoffTests(unittest.TestCase):
             with self.assertRaises(ValueError):template_customer.process(store,data,owner)
             result=process_request(store,grant,'test-key','123',client,owner,data)
             self.assertIn('001',result['csv'])
+            prepared=prepare_delivery(store,grant,'test-key','123',client,owner,
+                {**data,'inspection_passed':False},destination='https://synthetic.invalid/orders/1')
+            self.assertTrue(prepared['evidence']['inspection_passed'])
+            self.assertEqual(prepared['artifact'],result['csv'].encode())
+            with self.assertRaises(ValueError):prepare_delivery(store,grant,'test-key','123',client,'b'*40,data,
+                destination='https://synthetic.invalid/orders/1')
+            with self.assertRaises(ValueError):prepare_delivery(store,grant,'test-key','123',client,owner,
+                {**data,'csv':'sku\n002\n','inspection_passed':True},destination='https://synthetic.invalid/orders/1')
             self.row['reply_text']='Consent withdrawn'
             with self.assertRaises(ValueError):process_request(store,grant,'test-key','123',client,owner,data)
