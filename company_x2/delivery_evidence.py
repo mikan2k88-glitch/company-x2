@@ -23,3 +23,22 @@ def prepare_delivery(store,grant,signing_key,reply_id,client,owner,data,*,destin
             'plan_sha256':record['approval_sha256'],'artifact_sha256':digest,'destination':destination,
             'source_rechecked':True,'inspection_passed':True,'plan_accepted':True}
         return {'evidence':evidence,'artifact':artifact}
+
+
+def deliver_owned_work(journal,permit,adapter,store,grant,signing_key,reply_id,client,owner,data,
+                       *,is_stopped=lambda:True):
+    """Internal entry point: callers cannot supply inspection or consent evidence.
+
+    Requires an operator-owned permit and adapter. No HTTP route enables this.
+    Rebuilds evidence before claiming and immediately before the adapter send.
+    Customer input and artifact bytes remain transient, outside the journal.
+    """
+    from .delivery_permission import Permit,deliver_permitted
+    if is_stopped() is not False:raise ValueError('External delivery stopped')
+    if not isinstance(permit,Permit):raise ValueError('Operator permission required')
+    def prepare():
+        return prepare_delivery(store,grant,signing_key,reply_id,client,owner,data,
+                                destination=permit.destination)
+    prepared=prepare()
+    return deliver_permitted(journal,permit,prepared['artifact'],adapter,
+                             lambda:prepare()['evidence'],is_stopped=is_stopped)
