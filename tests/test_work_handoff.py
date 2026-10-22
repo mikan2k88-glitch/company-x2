@@ -9,8 +9,8 @@ from company_x2.intake_access import issue
 from company_x2.work_handoff import bind_request, process_request
 from company_x2 import template_customer
 from company_x2.store import Store
-from company_x2.delivery_evidence import prepare_delivery
-from company_x2.delivery_permission import Permit,deliver_permitted
+from company_x2.delivery_evidence import prepare_delivery,deliver_owned_work
+from company_x2.delivery_permission import Permit
 from company_x2.delivery_journal import Journal
 
 
@@ -83,17 +83,25 @@ class HandoffTests(unittest.TestCase):
             permit=Permit('https://synthetic.invalid',destination,self.row['id'],'123',
                 record['approval_sha256'],prepared['evidence']['artifact_sha256'],
                 datetime.now(timezone.utc)+timedelta(minutes=5),'synthetic-policy-review')
-            def verified():
-                return prepare_delivery(store,grant,'test-key','123',client,owner,data,destination=destination)['evidence']
+            def deliver(**options):
+                return deliver_owned_work(journal,permit,adapter,store,grant,'test-key','123',client,owner,data,**options)
             def send(target,artifact):
                 sent.append(target)
                 return dict(id='synthetic-receipt',destination=target,artifact_sha256=hashlib.sha256(artifact).hexdigest())
             adapter=type('SyntheticAdapter',(),{'send':staticmethod(send)})()
             journal=Journal(Path(tmp)/'journal')
-            with self.assertRaises(ValueError):deliver_permitted(journal,permit,prepared['artifact'],adapter,verified)
+            with self.assertRaises(ValueError):deliver()
             self.assertFalse(sent)
-            self.assertEqual(deliver_permitted(journal,permit,prepared['artifact'],adapter,verified,is_stopped=lambda:False)['state'],'confirmed')
-            self.assertTrue(deliver_permitted(journal,permit,prepared['artifact'],adapter,verified,is_stopped=lambda:False)['replayed'])
+            # A stop after the durable claim must prevent the actual adapter call.
+            stops=iter([False,False,False,True])
+            with self.assertRaises(ValueError):deliver(is_stopped=lambda:next(stops))
+            self.assertFalse(sent)
+            self.assertEqual(deliver(is_stopped=lambda:False)['state'],'uncertain')
+            self.assertFalse(sent)
+            # A separate synthetic journal represents an independent test run.
+            journal=Journal(Path(tmp)/'successful-journal')
+            self.assertEqual(deliver(is_stopped=lambda:False)['state'],'confirmed')
+            self.assertTrue(deliver(is_stopped=lambda:False)['replayed'])
             self.assertEqual(len(sent),1)
             scoped=template_customer.OwnedStore(store,owner)
             stored=scoped.opportunities()[0];stored['issue_count']=1
@@ -107,5 +115,5 @@ class HandoffTests(unittest.TestCase):
                 {**data,'csv':'sku\n002\n','inspection_passed':True},destination='https://synthetic.invalid/orders/1')
             self.row['reply_text']='Consent withdrawn'
             with self.assertRaises(ValueError):process_request(store,grant,'test-key','123',client,owner,data)
-            with self.assertRaises(ValueError):deliver_permitted(journal,permit,prepared['artifact'],adapter,verified,is_stopped=lambda:False)
+            with self.assertRaises(ValueError):deliver(is_stopped=lambda:False)
             self.assertEqual(len(sent),1)
