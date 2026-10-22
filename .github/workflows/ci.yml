@@ -19,6 +19,9 @@ jobs:
       - run: node tests/browser_delivery_fixture.cjs
         env:
           NODE_PATH: ./tests/browser-runtime/node_modules
+      - run: node tests/browser_owned_delivery.cjs
+        env:
+          NODE_PATH: ./tests/browser-runtime/node_modules
   test:
     runs-on: ubuntu-latest
     steps:
@@ -61,6 +64,10 @@ jobs:
       - run: npm install --prefix tests/browser-runtime --no-save --ignore-scripts playwright@1.62.1
       - run: node tests/browser-runtime/node_modules/playwright/cli.js install --with-deps chromium-headless-shell
       - run: node tests/browser_delivery_fixture.cjs
+        env:
+          NODE_PATH: ./tests/browser-runtime/node_modules
+          CX2_BROWSER_POSTGRES: "1"
+      - run: node tests/browser_owned_delivery.cjs
         env:
           NODE_PATH: ./tests/browser-runtime/node_modules
           CX2_BROWSER_POSTGRES: "1"
