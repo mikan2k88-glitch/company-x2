@@ -95,6 +95,12 @@ class HandoffTests(unittest.TestCase):
             self.assertEqual(deliver_permitted(journal,permit,prepared['artifact'],adapter,verified,is_stopped=lambda:False)['state'],'confirmed')
             self.assertTrue(deliver_permitted(journal,permit,prepared['artifact'],adapter,verified,is_stopped=lambda:False)['replayed'])
             self.assertEqual(len(sent),1)
+            scoped=template_customer.OwnedStore(store,owner)
+            stored=scoped.opportunities()[0];stored['issue_count']=1
+            scoped.save_opportunity(stored,'blocked','Synthetic inspection hold')
+            with self.assertRaises(ValueError):prepare_delivery(store,grant,'test-key','123',client,owner,
+                {**data,'inspection_passed':True},destination=destination)
+            stored['issue_count']=0;scoped.save_opportunity(stored,'blocked','Synthetic hold cleared')
             with self.assertRaises(ValueError):prepare_delivery(store,grant,'test-key','123',client,'b'*40,data,
                 destination='https://synthetic.invalid/orders/1')
             with self.assertRaises(ValueError):prepare_delivery(store,grant,'test-key','123',client,owner,
