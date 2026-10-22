@@ -1,5 +1,7 @@
 import unittest
 import tempfile
+import hashlib
+from datetime import datetime,timezone,timedelta
 from pathlib import Path
 from company_x2.autonomy import FREE, AI
 from company_x2.work_handoff import verified_contact, recheck_contact, invited_contact
@@ -7,6 +9,9 @@ from company_x2.intake_access import issue
 from company_x2.work_handoff import bind_request, process_request
 from company_x2 import template_customer
 from company_x2.store import Store
+from company_x2.delivery_evidence import prepare_delivery
+from company_x2.delivery_permission import Permit,deliver_permitted
+from company_x2.delivery_journal import Journal
 
 
 class HandoffTests(unittest.TestCase):
@@ -70,5 +75,37 @@ class HandoffTests(unittest.TestCase):
             with self.assertRaises(ValueError):template_customer.process(store,data,owner)
             result=process_request(store,grant,'test-key','123',client,owner,data)
             self.assertIn('001',result['csv'])
+            prepared=prepare_delivery(store,grant,'test-key','123',client,owner,
+                {**data,'inspection_passed':False},destination='https://synthetic.invalid/orders/1')
+            self.assertTrue(prepared['evidence']['inspection_passed'])
+            self.assertEqual(prepared['artifact'],result['csv'].encode())
+            destination='https://synthetic.invalid/orders/1';sent=[]
+            permit=Permit('https://synthetic.invalid',destination,self.row['id'],'123',
+                record['approval_sha256'],prepared['evidence']['artifact_sha256'],
+                datetime.now(timezone.utc)+timedelta(minutes=5),'synthetic-policy-review')
+            def verified():
+                return prepare_delivery(store,grant,'test-key','123',client,owner,data,destination=destination)['evidence']
+            def send(target,artifact):
+                sent.append(target)
+                return dict(id='synthetic-receipt',destination=target,artifact_sha256=hashlib.sha256(artifact).hexdigest())
+            adapter=type('SyntheticAdapter',(),{'send':staticmethod(send)})()
+            journal=Journal(Path(tmp)/'journal')
+            with self.assertRaises(ValueError):deliver_permitted(journal,permit,prepared['artifact'],adapter,verified)
+            self.assertFalse(sent)
+            self.assertEqual(deliver_permitted(journal,permit,prepared['artifact'],adapter,verified,is_stopped=lambda:False)['state'],'confirmed')
+            self.assertTrue(deliver_permitted(journal,permit,prepared['artifact'],adapter,verified,is_stopped=lambda:False)['replayed'])
+            self.assertEqual(len(sent),1)
+            scoped=template_customer.OwnedStore(store,owner)
+            stored=scoped.opportunities()[0];stored['issue_count']=1
+            scoped.save_opportunity(stored,'blocked','Synthetic inspection hold')
+            with self.assertRaises(ValueError):prepare_delivery(store,grant,'test-key','123',client,owner,
+                {**data,'inspection_passed':True},destination=destination)
+            stored['issue_count']=0;scoped.save_opportunity(stored,'blocked','Synthetic hold cleared')
+            with self.assertRaises(ValueError):prepare_delivery(store,grant,'test-key','123',client,'b'*40,data,
+                destination='https://synthetic.invalid/orders/1')
+            with self.assertRaises(ValueError):prepare_delivery(store,grant,'test-key','123',client,owner,
+                {**data,'csv':'sku\n002\n','inspection_passed':True},destination='https://synthetic.invalid/orders/1')
             self.row['reply_text']='Consent withdrawn'
             with self.assertRaises(ValueError):process_request(store,grant,'test-key','123',client,owner,data)
+            with self.assertRaises(ValueError):deliver_permitted(journal,permit,prepared['artifact'],adapter,verified,is_stopped=lambda:False)
+            self.assertEqual(len(sent),1)

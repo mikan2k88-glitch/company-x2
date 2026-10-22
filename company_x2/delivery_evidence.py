@@ -1,0 +1,25 @@
+"""Internal evidence from owned stored work plus a fresh independent replay."""
+import hashlib
+from . import template_customer, template_session, public_intake
+from .work_handoff import process_request
+
+
+def prepare_delivery(store,grant,signing_key,reply_id,client,owner,data,*,destination):
+    """Destination is supplied by operator configuration, never customer input."""
+    with public_intake.LOCK, template_session.LOCK:
+        record=next((r for r in template_customer.OwnedStore(store,owner).opportunities()
+                     if r['external_id']==data.get('request_key')),None)
+        if not record or record['status'] not in ('ready','received') or not record.get('handoff'):
+            raise ValueError('Previously verified source-bound artifact required')
+        if record.get('issue_count')!=0:raise ValueError('Unresolved artifact inspection issues')
+        result=process_request(store,grant,signing_key,reply_id,client,owner,data)
+        report=result.get('report',{})
+        if report.get('verified') is not True or report.get('ready_for_import') is not True or report.get('issues'):
+            raise ValueError('Independent replay inspection failed')
+        artifact=result['csv'].encode('utf-8')
+        digest=hashlib.sha256(artifact).hexdigest()
+        if digest!=record.get('artifact_sha256'):raise ValueError('Stored artifact evidence differs')
+        evidence={'contact_id':record['handoff']['contact_id'],'reply_id':record['handoff']['reply_id'],
+            'plan_sha256':record['approval_sha256'],'artifact_sha256':digest,'destination':destination,
+            'source_rechecked':True,'inspection_passed':True,'plan_accepted':True}
+        return {'evidence':evidence,'artifact':artifact}
