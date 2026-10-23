@@ -21,7 +21,7 @@ class DeliveryCandidateTests(unittest.TestCase):
         for role in roles.values():self.sql(f'CREATE ROLE {role}')
         # Supabase service_role bypasses RLS; reproduce that only in this test DB.
         self.sql(f"ALTER ROLE {roles['service_role']} BYPASSRLS")
-        candidate=(Path(__file__).parents[1]/'supabase'/'delivery_rpc_candidate.sql').read_text()
+        candidate=(Path(__file__).parents[1]/'supabase'/'migrations'/'20261023114445_delivery_journal.sql').read_text()
         candidate=candidate.replace('company_x2',schema).replace('public.cx2_delivery',api+'.cx2_delivery')
         # Keep PUBLIC as the built-in role; replace only the named Supabase roles.
         for name,role in roles.items():candidate=candidate.replace(name,role)
