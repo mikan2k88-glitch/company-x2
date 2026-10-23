@@ -31,7 +31,7 @@ class SupabaseStore:
         self.opener = opener or urllib.request.build_opener(NoRedirect()).open
 
     def rpc(self, action, payload=None, *, endpoint='cx2_store'):
-        if endpoint not in ('cx2_store', 'cx2_scout', 'cx2_services', 'cx2_company', 'cx2_support','cx2_case','cx2_support_auto','cx2_outreach','cx2_autonomy','cx2_trial'):
+        if endpoint not in ('cx2_store', 'cx2_scout', 'cx2_services', 'cx2_company', 'cx2_support','cx2_case','cx2_support_auto','cx2_outreach','cx2_autonomy','cx2_trial','cx2_delivery'):
             raise ValueError('Unknown RPC endpoint')
         headers = {'Content-Type': 'application/json', 'apikey': self.key}
         if not self.key.startswith('sb_secret_'):
@@ -50,7 +50,7 @@ class SupabaseStore:
                 401: 'Authentication rejected: verify server key and project URL match',
                 403: 'Permission denied: use a server secret/service-role key and verify RPC grant',
                 404: 'RPC unavailable: apply ' + {'cx2_store':'002_sandbox_rpc.sql', 'cx2_scout':'003_public_scout.sql',
-                    'cx2_services':'004_data_services.sql', 'cx2_company':'009_company.sql', 'cx2_support':'support_inbox migration','cx2_case':'order_support_cases migration','cx2_support_auto':'support_automation migration','cx2_outreach':'external_outbox migration','cx2_autonomy':'autonomous_control migration','cx2_trial':'free_trial_report migration'}[endpoint] + ' in this project and reload the API schema',
+                    'cx2_services':'004_data_services.sql', 'cx2_company':'009_company.sql', 'cx2_support':'support_inbox migration','cx2_case':'order_support_cases migration','cx2_support_auto':'support_automation migration','cx2_outreach':'external_outbox migration','cx2_autonomy':'autonomous_control migration','cx2_trial':'free_trial_report migration','cx2_delivery':'20261023114445_delivery_journal.sql'}[endpoint] + ' in this project and reload the API schema',
                 429: 'Supabase rate limit reached; retry later',
             }
             hint = hints.get(exc.code, 'Supabase service failed; verify project availability')
@@ -81,6 +81,16 @@ class SupabaseStore:
 
     def trial_rpc(self,action,payload=None):
         return self.rpc(action,payload,endpoint='cx2_trial')
+
+    def delivery_rpc(self,action,payload=None):
+        return self.rpc(action,payload,endpoint='cx2_delivery')
+
+    def delivery_journal(self):
+        """Explicit server-only factory; never creates a claim or enables sends."""
+        from .cloud_delivery_journal import CloudJournal
+        if self.delivery_rpc('ping')!={'delivery_schema_version':1}:
+            raise StorageUnavailable('Delivery journal schema unavailable')
+        return CloudJournal(self.delivery_rpc)
 
     def services_ready(self):
         return self.rpc('ping', endpoint='cx2_services') == {'schema_version': 4}
