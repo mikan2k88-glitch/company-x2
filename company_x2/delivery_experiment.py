@@ -15,7 +15,9 @@ def deliver_once(journal, *, contact, reply, plan, destination, artifact, approv
     if not lease:return {'replayed':True, **journal.state(key)}
     try:
         if authorize() is not True:raise ValueError('Delivery stopped before send')
-        receipt=adapter.send(destination,artifact)
+        from .staged_delivery import StagedAdapter
+        receipt=(adapter.send_checked(destination,artifact,authorize) if isinstance(adapter,StagedAdapter)
+                 else adapter.send(destination,artifact))
         if (not isinstance(receipt,dict) or receipt.get('destination')!=destination
                 or receipt.get('artifact_sha256')!=digest):
             raise ValueError('Delivery acknowledgement mismatch')
