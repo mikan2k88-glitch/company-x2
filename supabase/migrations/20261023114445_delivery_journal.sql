@@ -1,6 +1,4 @@
--- REVIEW CANDIDATE ONLY: not a migration and not installed in production.
--- Generate the final migration with Supabase CLI after isolated verification.
--- This adds storage capability only; it does not authorize or enable sending.
+-- Server-only delivery journal. Does not enable sending.
 begin;
 create schema if not exists company_x2;
 create table company_x2.delivery_claims (
