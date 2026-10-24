@@ -20,6 +20,7 @@ from company_x2.delivery_evidence import deliver_owned_work
 from company_x2.delivery_permission import Permit
 from company_x2.delivery_journal import Journal
 from company_x2.cloud_delivery_journal import CloudJournal
+from company_x2.staged_delivery import StagedAdapter
 
 
 def emit(value):
@@ -61,13 +62,29 @@ def main():
             permit=Permit('https://synthetic.invalid',destination,row['id'],'123',record['approval_sha256'],
                 hashlib.sha256(work['csv'].encode()).hexdigest(),datetime.now(timezone.utc)+timedelta(minutes=5),'synthetic-fixture-only')
             journal=CloudJournal(rpc) if postgres else Journal(Path(tmp)/'journal.db')
-            def send(target,artifact):
-                emit(dict(event='send',destination=target,artifact=artifact.decode()))
+            revoked=len(sys.argv)>1 and sys.argv[1]=='revoke-after-stage'
+            def stage(target,artifact):
+                emit(dict(event='stage',destination=target,artifact=artifact.decode()))
+                staged=json.loads(sys.stdin.readline())
+                if revoked:row['reply_text']='Consent withdrawn'
+                return staged
+            def commit(staged):
+                emit(dict(event='commit',destination=staged['destination']))
                 return json.loads(sys.stdin.readline())
-            adapter=type('SyntheticBrowserBridge',(),{'send':staticmethod(send)})()
+            backend=type('SyntheticBrowserBridge',(),{'stage':staticmethod(stage),'commit':staticmethod(commit)})()
+            adapter=StagedAdapter(backend)
             def deliver():
                 return deliver_owned_work(journal,permit,adapter,store,grant,'synthetic-only-signing-key',
                     '123',client,owner,data,is_stopped=lambda:False)
+            if revoked:
+                try:deliver()
+                except ValueError:pass
+                else:raise AssertionError('Staged revoked consent was accepted')
+                # Restoring consent must not automatically retry the ambiguous claim.
+                row['reply_text']=FREE+' '+AI
+                assert deliver()['state']=='uncertain'
+                emit(dict(event='done',state='uncertain',backend='postgres' if postgres else 'sqlite'))
+                return
             result=deliver()
             assert result['state']=='confirmed'
             # New journal object verifies replay uses durable state rather than memory.
