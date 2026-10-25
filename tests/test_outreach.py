@@ -55,3 +55,15 @@ class OutreachTests(unittest.TestCase):
   observed=client.observe(job);self.assertEqual(observed['reply_id'],10)
   self.assertTrue(self.store.outreach_rpc('observe',observed));self.assertFalse(self.store.outreach_rpc('observe',observed))
   saved=self.store.outreach_rpc('list')[0];self.assertEqual(saved['status'],'sent');self.assertIn('not accepted',saved['next_message'])
+ def test_observation_rechecks_current_source_before_reading_replies(self):
+  self.prepare();job=self.store.outreach_rpc('claim');job['comment_url']=URL+'#issuecomment-9'
+  client=outreach.GitHubContact(ENV)
+  for change in ({'body':'Permission withdrawn'},{'state':'closed'},{'locked':True},
+                 {'assignees':[{}]},{'user':{'login':'other'}},{'id':124}):
+   calls=[]
+   def api(path,data=None):
+    calls.append(path)
+    if '?' in path:raise AssertionError('Replies read after source permission changed')
+    return {**issue(),**change}
+   client.api=api
+   self.assertIsNone(client.observe(job));self.assertEqual(len(calls),1)
