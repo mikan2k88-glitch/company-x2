@@ -75,8 +75,11 @@ class GitHubContact:
         if not m or '/'.join(m.groups()[:2]).lower() not in status(self.env)['repos']:return None
         path='/repos/'+m[1]+'/'+m[2]+'/issues/'+m[3]
         issue=self.api(path)
-        if str(issue['id'])!=job['issue_id'] or issue.get('comments',101)>100:return None
+        if (not candidate(issue,self.env) or str(issue['id'])!=job['issue_id']
+                or issue.get('user',{}).get('login')!=job['author']
+                or issue.get('comments',101)>100):return None
         comments=self.api(path+'/comments?per_page=100')
+        if not isinstance(comments,list):return None
         sent=int(job['comment_url'].rsplit('-',1)[-1])
         replies=[c for c in comments if type(c.get('id')) is int and c['id']>sent and c.get('user',{}).get('login')==job['author'] and isinstance(c.get('body'),str)]
         if not replies:return None
