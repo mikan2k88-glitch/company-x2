@@ -2,6 +2,11 @@
 const assert=require('node:assert/strict'),http=require('node:http'),crypto=require('node:crypto');
 const {spawn}=require('node:child_process'),readline=require('node:readline');
 const {chromium}=require('playwright');
+const fs=require('node:fs');
+function memory(name){
+ try{const raw=fs.readFileSync('/sys/fs/cgroup/'+name,'utf8').trim();return /^\d+$/.test(raw)?Number(raw):null;}
+ catch{return null;}
+}
 let sends=0,worker,browser;
 const destination='https://synthetic.invalid/orders/1';
 const server=http.createServer(async(req,res)=>{
@@ -22,6 +27,8 @@ const server=http.createServer(async(req,res)=>{
 (async()=>{
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  try{
+  if(process.env.CX2_EXPECT_MEMORY_LIMIT_BYTES && memory('memory.max')!==Number(process.env.CX2_EXPECT_MEMORY_LIMIT_BYTES))
+   throw Error('Expected isolated cgroup limit not applied');
   const origin=`http://127.0.0.1:${server.address().port}`;
   browser=await chromium.launch({headless:true});
   const context=await browser.newContext({serviceWorkers:'block',acceptDownloads:false});
@@ -53,6 +60,7 @@ const server=http.createServer(async(req,res)=>{
   assert.equal(await finished,0,errors);assert.equal(done,true);assert.equal(sends,scenario==='success'?1:0);
   }
   console.log('Owned work, current consent, durable journal and Chromium delivery passed; synthetic only');
+  console.log(JSON.stringify({synthetic_only:true,cgroup_limit_bytes:memory('memory.max'),cgroup_peak_bytes:memory('memory.peak')}));
  }finally{
   if(worker&&worker.exitCode===null)worker.kill();
   if(browser)await browser.close();await new Promise(resolve=>server.close(resolve));

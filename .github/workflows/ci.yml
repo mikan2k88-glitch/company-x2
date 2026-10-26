@@ -23,6 +23,16 @@ jobs:
           -e NODE_PATH=/dependencies -e CX2_BROWSER_PROBE=1 -e CX2_EXPECT_MEMORY_LIMIT_BYTES=536870912
           mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
           node /probe/browser_runtime_probe.cjs
+      - run: docker build -f tests/browser-memory.Dockerfile -t cx2-synthetic-browser-memory tests
+      - run: >-
+          docker run --rm --init --network=none --memory=512m --memory-swap=512m
+          --pids-limit=256 --cap-drop=ALL --security-opt=no-new-privileges
+          --read-only --tmpfs /tmp:rw,size=64m --user pwuser --workdir /workspace
+          --mount type=bind,source=${{ github.workspace }}/company_x2,target=/workspace/company_x2,readonly
+          --mount type=bind,source=${{ github.workspace }}/tests,target=/workspace/tests,readonly
+          -e NODE_PATH=/workspace/tests/browser-runtime/node_modules -e PYTHON=python3
+          -e PYTHONDONTWRITEBYTECODE=1 -e CX2_EXPECT_MEMORY_LIMIT_BYTES=536870912
+          cx2-synthetic-browser-memory node tests/browser_owned_delivery.cjs
   browser:
     runs-on: ubuntu-latest
     timeout-minutes: 10
