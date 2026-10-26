@@ -11,6 +11,16 @@ function memory(name){
 let sends=0,worker,browser,backend;
 const destination='https://synthetic.invalid/orders/1';
 const server=http.createServer(async(req,res)=>{
+ if(req.method==='GET'&&req.url==='/redirect'){
+  res.writeHead(302,{Location:'/'});res.end();return;
+ }
+ if(req.method==='GET'&&req.url==='/auto'){
+  res.setHeader('Content-Type','text/html; charset=utf-8');
+  res.end(`<input type="file" id="artifact"><button id="deliver">Deliver</button>
+   <script>document.querySelector('#artifact').onchange=async()=>{
+    try{await fetch('/deliver',{method:'POST',body:await document.querySelector('#artifact').files[0].arrayBuffer()});}catch{}
+   };</script>`);return;
+ }
  if(req.method==='GET'&&req.url==='/'){
   res.setHeader('Content-Type','text/html; charset=utf-8');
   res.end(`<input type="file" id="artifact"><button id="deliver">Deliver</button><pre id="receipt"></pre>
@@ -39,6 +49,12 @@ const server=http.createServer(async(req,res)=>{
   await backend.page.locator('#artifact').setInputFiles({name:'changed.csv',mimeType:'text/csv',buffer:Buffer.from('synthetic-changed')});
   await assert.rejects(()=>backend.commit(staged),/Selected artifact changed/);
   assert.equal(sends,0);await backend.close();backend=null;
+  for(const path of ['/auto','/redirect']){
+   backend=new FixedFileBackend(browser,{enabled:true,pageUrl:origin+path,uploadUrl:origin+'/deliver',destination,loopbackFixture:true});
+   await assert.rejects(()=>backend.stage(destination,Buffer.from('synthetic-original')));
+   assert.equal(backend.tainted,true);assert.equal(sends,0);
+   await backend.close();backend=null;
+  }
   // HTTPS permit target is mapped to this loopback fixture only by test code.
   for(const scenario of ['revoke-after-stage','success']){
   worker=spawn(process.env.PYTHON||'python',['tests/browser_owned_delivery_helper.py',scenario],{stdio:['pipe','pipe','pipe']});

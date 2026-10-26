@@ -24,11 +24,23 @@ class FixedFileBackend{
    const request=route.request();
    if(navigationAllowed&&request.url()===this.pageUrl&&request.method()==='GET'&&
       request.isNavigationRequest()&&request.frame()===this.page.mainFrame()){
-    navigationAllowed=false;return route.continue();
+    navigationAllowed=false;
+    // Browser route.continue follows redirects without re-running this handler.
+    // Fetch one hop explicitly so a redirect never navigates to another URL.
+    try{
+     const response=await route.fetch({maxRedirects:0,timeout:15000});
+     if(response.status()>=300&&response.status()<400){this.tainted=true;return route.abort();}
+     return route.fulfill({response});
+    }catch{this.tainted=true;return route.abort();}
    }
    if(this.armed&&request.url()===this.uploadUrl&&request.method()==='POST'&&
       request.frame()===this.page.mainFrame()&&digest(request.postDataBuffer()||Buffer.alloc(0))===this.hash){
-    this.armed=false;return route.continue();
+    this.armed=false;
+    try{
+     const response=await route.fetch({maxRedirects:0,timeout:15000});
+     if(response.status()>=300&&response.status()<400){this.tainted=true;return route.abort();}
+     return route.fulfill({response});
+    }catch{this.tainted=true;return route.abort();}
    }
    this.tainted=true;return route.abort();
   });
