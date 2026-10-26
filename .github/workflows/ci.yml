@@ -3,6 +3,26 @@ on: [push, pull_request]
 permissions:
   contents: read
 jobs:
+  browser-memory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm install --prefix tests/browser-runtime --no-save --ignore-scripts playwright@1.62.1
+      # Official development image, pinned to the matching version and digest.
+      # Synthetic content only; this is not a production crawling environment.
+      - run: >-
+          docker run --rm --init --network=none --memory=512m --memory-swap=512m
+          --pids-limit=256 --cap-drop=ALL --security-opt=no-new-privileges
+          --read-only --tmpfs /tmp:rw,size=64m --user pwuser
+          --mount type=bind,source=${{ github.workspace }}/tools,target=/probe,readonly
+          --mount type=bind,source=${{ github.workspace }}/tests/browser-runtime/node_modules,target=/dependencies,readonly
+          -e NODE_PATH=/dependencies -e CX2_BROWSER_PROBE=1 -e CX2_EXPECT_MEMORY_LIMIT_BYTES=536870912
+          mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
+          node /probe/browser_runtime_probe.cjs
   browser:
     runs-on: ubuntu-latest
     timeout-minutes: 10

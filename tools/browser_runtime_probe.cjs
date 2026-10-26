@@ -1,6 +1,15 @@
 // Opt-in synthetic runtime probe. No remote pages, credentials or customer files.
 const {execFileSync}=require('node:child_process');
 const {performance}=require('node:perf_hooks');
+const fs=require('node:fs');
+
+function cgroupMemory(){
+ const read=name=>{
+  try{const raw=fs.readFileSync('/sys/fs/cgroup/'+name,'utf8').trim();return /^\d+$/.test(raw)?Number(raw):null;}
+  catch{return null;}
+ };
+ return {current_bytes:read('memory.current'),peak_bytes:read('memory.peak'),limit_bytes:read('memory.max')};
+}
 
 function subtreeRssKiB(){
  if(process.platform!=='linux')return null;
@@ -17,9 +26,12 @@ function subtreeRssKiB(){
  }
  const {chromium}=require('playwright');
  let browser;const started=performance.now(),samples=[];
- const sample=phase=>samples.push({phase,subtree_rss_kib:subtreeRssKiB()});
+ const sample=phase=>samples.push({phase,subtree_rss_kib:subtreeRssKiB(),cgroup:cgroupMemory()});
  try{
   sample('before_launch');
+  if(process.env.CX2_EXPECT_MEMORY_LIMIT_BYTES &&
+     samples[0].cgroup.limit_bytes!==Number(process.env.CX2_EXPECT_MEMORY_LIMIT_BYTES))
+   throw Error('Expected isolated cgroup memory limit was not applied');
   browser=await chromium.launch({headless:true,timeout:30000});
   const startupMs=Math.round(performance.now()-started);sample('launched');
   const context=await browser.newContext({serviceWorkers:'block',acceptDownloads:false});
