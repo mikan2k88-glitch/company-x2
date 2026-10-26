@@ -8,9 +8,12 @@ function memory(name){
  try{const raw=fs.readFileSync('/sys/fs/cgroup/'+name,'utf8').trim();return /^\d+$/.test(raw)?Number(raw):null;}
  catch{return null;}
 }
-let sends=0,worker,browser,backend;
+let sends=0,worker,browser,backend,redirectUploads=false,redirectedUploads=0;
 const destination='https://synthetic.invalid/orders/1';
 const server=http.createServer(async(req,res)=>{
+ if(req.url==='/redirect-target'){
+  redirectedUploads++;res.end('Unexpected redirect reached');return;
+ }
  if(req.method==='GET'&&req.url==='/redirect'){
   res.writeHead(302,{Location:'/'});res.end();return;
  }
@@ -30,7 +33,9 @@ const server=http.createServer(async(req,res)=>{
  }
  if(req.method==='POST'&&req.url==='/deliver'){
   let body='';for await(const chunk of req){body+=chunk;if(body.length>50000){res.writeHead(413);res.end();return;}}
-  sends++;res.setHeader('Content-Type','application/json');
+  sends++;
+  if(redirectUploads){res.writeHead(307,{Location:'/redirect-target'});res.end();return;}
+  res.setHeader('Content-Type','application/json');
   res.end(JSON.stringify({id:'synthetic-owned-receipt',destination,artifact_sha256:crypto.createHash('sha256').update(body).digest('hex')}));return;
  }
  res.writeHead(404);res.end();
@@ -55,6 +60,13 @@ const server=http.createServer(async(req,res)=>{
    assert.equal(backend.tainted,true);assert.equal(sends,0);
    await backend.close();backend=null;
   }
+  backend=new FixedFileBackend(browser,{enabled:true,pageUrl:origin+'/',uploadUrl:origin+'/deliver',destination,loopbackFixture:true});
+  const redirectStaged=await backend.stage(destination,Buffer.from('synthetic-original'));
+  redirectUploads=true;
+  await assert.rejects(()=>backend.commit(redirectStaged));
+  assert.equal(backend.tainted,true);assert.equal(sends,1);assert.equal(redirectedUploads,0);
+  await assert.rejects(()=>backend.commit(redirectStaged));assert.equal(sends,1);
+  await backend.close();backend=null;redirectUploads=false;sends=0;
   // HTTPS permit target is mapped to this loopback fixture only by test code.
   for(const scenario of ['revoke-after-stage','success']){
   worker=spawn(process.env.PYTHON||'python',['tests/browser_owned_delivery_helper.py',scenario],{stdio:['pipe','pipe','pipe']});
