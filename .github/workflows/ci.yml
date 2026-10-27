@@ -33,6 +33,15 @@ jobs:
           -e NODE_PATH=/workspace/tests/browser-runtime/node_modules -e PYTHON=python3
           -e PYTHONDONTWRITEBYTECODE=1 -e CX2_EXPECT_MEMORY_LIMIT_BYTES=536870912
           cx2-synthetic-browser-memory node tests/browser_owned_delivery.cjs
+      - run: >-
+          docker run --rm --init --network=none --memory=512m --memory-swap=512m
+          --pids-limit=256 --cap-drop=ALL --security-opt=no-new-privileges
+          --read-only --tmpfs /tmp:rw,size=64m --user pwuser --workdir /workspace
+          --mount type=bind,source=${{ github.workspace }}/company_x2,target=/workspace/company_x2,readonly
+          --mount type=bind,source=${{ github.workspace }}/tests,target=/workspace/tests,readonly
+          -e NODE_PATH=/workspace/tests/browser-runtime/node_modules -e PYTHONDONTWRITEBYTECODE=1
+          -e CX2_TEST_REAL_BROWSER=1 cx2-synthetic-browser-memory
+          /bin/sh -c 'CX2_TEST_NODE="$(command -v node)" python3 -m unittest discover -s tests -p test_browser_bridge.py -v'
   browser:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -56,6 +65,10 @@ jobs:
         env:
           NODE_PATH: ./tests/browser-runtime/node_modules
           CX2_BROWSER_PROBE: "1"
+      - run: CX2_TEST_NODE="$(command -v node)" python -m unittest discover -s tests -p test_browser_bridge.py -v
+        env:
+          NODE_PATH: ./tests/browser-runtime/node_modules
+          CX2_TEST_REAL_BROWSER: "1"
   test:
     runs-on: ubuntu-latest
     steps:
