@@ -129,8 +129,11 @@ def execute(text, columns, mapping, required, approved_hash, accepted=False):
         raise ValueError('Output structure verification failed')
     # Verify against source again, independently of output_rows.
     for source, delivered in zip(rows, checked_rows):
+        # Headers are unique (read_csv). Rebuild from the original row rather
+        # than reuse production indexes or repeatedly search every header.
+        source_by_name = dict(zip(header, source))
         for column, value in zip(columns, delivered):
-            if value != source[header.index(mapping[column])]:
+            if value != source_by_name[mapping[column]]:
                 raise ValueError('Source preservation verification failed')
     return {'csv': content, 'report': {'input_rows': len(rows), 'output_rows': len(checked_rows),
             'issues': issues, 'verified': True, 'ready_for_import': not issues,
