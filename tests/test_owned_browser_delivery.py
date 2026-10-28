@@ -38,6 +38,7 @@ class OwnedBrowserEntryTests(unittest.TestCase):
             spawn.assert_not_called()
 
     def test_real_owned_work_rechecks_consent_and_replays_without_commit(self):
+        from company_x2.browser_operator_policy import BrowserPolicy,deliver_with_policy,require_policy
         from company_x2.autonomy import FREE,AI
         from company_x2.store import Store
         from company_x2 import template_customer
@@ -62,24 +63,30 @@ class OwnedBrowserEntryTests(unittest.TestCase):
             digest=hashlib.sha256(work['csv'].encode()).hexdigest()
             permit=Permit(self.permit.origin,self.permit.destination,row['id'],'123',
                 record['approval_sha256'],digest,self.permit.expires_at,'synthetic policy')
-            for revoked in (False,True):
-                with self.subTest(revoked=revoked),patch('company_x2.owned_browser_delivery.BrowserBridge') as factory:
+            for mode in ('normal','revoked','expired'):
+                clock=[datetime.now(timezone.utc)]
+                policy=BrowserPolicy(permit.origin,permit.origin+'/upload',clock[0]+timedelta(seconds=10),
+                    'synthetic site review','synthetic account review','synthetic runtime review',enabled=True)
+                with self.subTest(mode=mode),patch('company_x2.owned_browser_delivery.BrowserBridge') as factory,patch(
+                        'company_x2.browser_operator_policy.require_policy',
+                        side_effect=lambda p,permission:require_policy(p,permission,now=clock[0])):
                     bridge=factory.return_value.__enter__.return_value
                     def stage(destination,artifact):
                         self.assertEqual(artifact,work['csv'].encode())
-                        if revoked:row['reply_text']='Consent withdrawn'
+                        if mode=='revoked':row['reply_text']='Consent withdrawn'
+                        if mode=='expired':clock[0]+=timedelta(seconds=11)
                         return dict(destination=destination,artifact_sha256=digest)
                     bridge.stage.side_effect=stage
                     bridge.commit.return_value=dict(id='synthetic-receipt',destination=permit.destination,artifact_sha256=digest)
-                    journal=Journal(Path(tmp)/('revoked.db' if revoked else 'normal.db'))
+                    journal=Journal(Path(tmp)/(mode+'.db'))
                     def deliver():
-                        return deliver_owned_browser(journal,permit,store,grant,key,'123',client,owner,data,
-                            node_executable=sys.executable,upload_url=permit.origin+'/upload',
-                            enabled=True,is_stopped=lambda:False)
-                    if revoked:
+                        return deliver_with_policy(policy,journal,permit,store,grant,key,'123',client,owner,data,
+                            node_executable=sys.executable,is_stopped=lambda:False)
+                    if mode!='normal':
                         with self.assertRaises(ValueError):deliver()
                         bridge.commit.assert_not_called()
                         row['reply_text']=FREE+' '+AI
+                        clock[0]=policy.expires_at-timedelta(seconds=1)
                         self.assertEqual(deliver()['state'],'uncertain')
                     else:
                         self.assertEqual(deliver()['state'],'confirmed')
