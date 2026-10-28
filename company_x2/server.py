@@ -167,6 +167,8 @@ def handler_for(store, admin_token, *, allowed_hosts=(), access_password=None, s
                 return self.respond(200, (WEB.parent / 'template-intake.html').read_bytes(), 'text/html; charset=utf-8')
             if not self.access_allowed():
                 return
+            if path == '/quality':
+                return self.respond(200, (WEB.parent / 'quality.html').read_bytes(), 'text/html; charset=utf-8')
             if support_get(self,path,store):return
             if path == '/':
                 return self.respond(200, WEB.read_bytes(), 'text/html; charset=utf-8')
