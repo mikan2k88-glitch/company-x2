@@ -58,6 +58,9 @@ jobs:
       - run: node tests/browser_delivery_fixture.cjs
         env:
           NODE_PATH: ./tests/browser-runtime/node_modules
+      - run: node tests/quality_ui.cjs
+        env:
+          NODE_PATH: ./tests/browser-runtime/node_modules
       - run: node tests/browser_owned_delivery.cjs
         env:
           NODE_PATH: ./tests/browser-runtime/node_modules

@@ -1,0 +1,133 @@
+{
+  "version": 1,
+  "reviewed_on": "2026-10-28",
+  "projects": [
+    {
+      "id": "company-x2",
+      "name": "Company X2 限定制作基盤",
+      "verification": {
+        "code": {
+          "state": "verified",
+          "note": "限定CSV制作・独立検査・内部納品制御。E42全体の完成ではありません。",
+          "evidence": [
+            "https://github.com/mikan2k88-glitch/company-x2/pull/70"
+          ]
+        },
+        "tests": {
+          "state": "verified",
+          "note": "268件失敗0、27件skip。実サイトの無人納品は対象外。",
+          "evidence": [
+            "https://github.com/mikan2k88-glitch/company-x2/actions/runs/40697602918"
+          ]
+        },
+        "production": {
+          "state": "verified",
+          "note": "PR70のRender Liveを確認。ブラウザ実送信は未導入。",
+          "evidence": [
+            "dep-dbgvkquq1p3s73bf41m0"
+          ]
+        },
+        "customers": {
+          "state": "pending",
+          "note": "実案件3件の受領・採算検証は未達。",
+          "evidence": []
+        }
+      },
+      "issues": [
+        {
+          "id": "CX2-01",
+          "priority": 1,
+          "title": "所有者別の古い依頼取得",
+          "next_action": "owner filterより前の全体100件上限を直接取得へ置き換える",
+          "acceptance": "100件超の他用途レコードがあっても本人の依頼を取得でき、他所有者は取得不可。",
+          "status": "open",
+          "evidence": []
+        },
+        {
+          "id": "CX2-02",
+          "priority": 1,
+          "title": "本番ブラウザと送信先の接続",
+          "next_action": "固定の許可済み窓口と隔離実行環境を確認する",
+          "acceptance": "許可根拠・期限・停止・送信結果不明時の再送防止を実環境で確認。",
+          "status": "open",
+          "evidence": []
+        },
+        {
+          "id": "CX2-03",
+          "priority": 1,
+          "title": "無人処理の資料引継ぎ",
+          "next_action": "同意・アクセス制限・保存期限・削除の設計を実装する",
+          "acceptance": "PC停止中も許可済み資料を取得でき、期限切れ資料は取得不可。",
+          "status": "open",
+          "evidence": []
+        },
+        {
+          "id": "CX2-04",
+          "priority": 1,
+          "title": "需要とサービスの一致",
+          "next_action": "30件台帳から同じ成果物を求める独立依頼者を確認する",
+          "acceptance": "独立5者の根拠と受注可能条件を確認。募集金額を売上扱いしない。",
+          "status": "open",
+          "evidence": []
+        },
+        {
+          "id": "CX2-05",
+          "priority": 2,
+          "title": "実案件の受領と採算",
+          "next_action": "受付再開の承認前は停止を維持し、実績を人工試験と分離する",
+          "acceptance": "実顧客3件の受領・修正・費用・人手介入を記録。",
+          "status": "open",
+          "evidence": []
+        },
+        {
+          "id": "CX2-06",
+          "priority": 2,
+          "title": "CSV検査の繰り返し列探索",
+          "next_action": "実データを使わず回帰試験と人工計測で確認する",
+          "acceptance": "値保持と故意改変検出を維持して処理時間を改善。",
+          "status": "resolved",
+          "evidence": [
+            "https://github.com/mikan2k88-glitch/company-x2/pull/70"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "autonomous-revenue-system",
+      "name": "自動収益システム（連携前）",
+      "verification": {
+        "code": {
+          "state": "pending",
+          "note": "初期段階。Company X2側では稼働・品質を未検証。",
+          "evidence": []
+        },
+        "tests": {
+          "state": "pending",
+          "note": "初期段階。Company X2側では稼働・品質を未検証。",
+          "evidence": []
+        },
+        "production": {
+          "state": "pending",
+          "note": "初期段階。Company X2側では稼働・品質を未検証。",
+          "evidence": []
+        },
+        "customers": {
+          "state": "pending",
+          "note": "初期段階。Company X2側では稼働・品質を未検証。",
+          "evidence": []
+        }
+      },
+      "issues": [
+        {
+          "id": "ARS-01",
+          "priority": 2,
+          "title": "役割と連携仕様の整理",
+          "next_action": "開発側の実装が進んだ時点で仕様を照合する",
+          "acceptance": "案件・進捗・費用の契約を決め、権限や顧客情報を共有しない。",
+          "status": "open",
+          "evidence": []
+        }
+      ]
+    }
+  ]
+}

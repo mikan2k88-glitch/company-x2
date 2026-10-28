@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>品質・改善室 | Company X2</title>
+<style>body{background:#101820;color:#e4eef4;font:16px/1.6 system-ui;margin:0}main{max-width:1100px;margin:auto;padding:28px}a{color:#9ce3c3}section{border:1px solid #42525f;border-radius:12px;padding:20px;margin:20px 0}table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:10px;border-bottom:1px solid #42525f}button{padding:10px 18px;cursor:pointer}small{color:#adbeca}.pending{color:#ffd88b}.verified{color:#9ce3c3}#error{color:#ffb6b6}article{border-top:1px solid #42525f;padding:12px 0}h3{margin-bottom:6px}@media(max-width:600px){main{padding:14px}td,th{padding:6px;font-size:14px}}</style>
+<main><a href="/company">Company X2に戻る</a><h1>品質・改善室</h1>
+<p>実装・試験・本番確認・実顧客検証を分けて評価し、次の改善を選びます。</p>
+<button id="refresh">記録を再読み込み</button><p id="notice"></p><p id="error" role="alert"></p><div id="projects"></div>
+<small>課題と根拠はコードレビューを通して更新します。この画面から課金・送信・受付を有効にすることはできません。</small></main>
+<script>
+const labels={code:'コード',tests:'試験',production:'本番確認',customers:'実顧客検証'};
+const states={open:'未着手',in_progress:'対応中',resolved:'解決確認済み'};
+function el(tag,text,parent){const node=document.createElement(tag);node.textContent=text;if(parent)parent.append(node);return node;}
+async function load(){const button=document.querySelector('#refresh');button.disabled=true;document.querySelector('#error').textContent='';
+ try{const response=await fetch('/api/company/quality');if(!response.ok)throw Error('記録を取得できません。管理者としてログインし直してください。');const data=await response.json();
+ document.querySelector('#notice').textContent=data.notice+' 記録日: '+data.reviewed_on;
+ const root=document.querySelector('#projects');root.replaceChildren();
+ for(const project of data.projects){const section=el('section','',root);el('h2',project.name,section);el('p','未解決課題 '+project.open_issues+'件 / '+(project.validation_complete?'全段階の根拠あり':'検証途中'),section);
+ const table=el('table','',section);for(const [key,label] of Object.entries(labels)){const row=el('tr','',table);el('th',label,row);const stage=project.verification[key];const cell=el('td',stage.state==='verified'?'確認済み':'未確認',row);cell.className=stage.state;el('td',stage.note,row);}
+ for(const issue of project.issues){const article=el('article','',section);el('h3','P'+issue.priority+' · '+issue.title,article);el('p',states[issue.status]+' / '+issue.next_action,article);el('small','完了条件: '+issue.acceptance,article);}
+ }}catch(error){document.querySelector('#error').textContent=error.message;}finally{button.disabled=false;}}
+document.querySelector('#refresh').addEventListener('click',load);load();
+</script></html>

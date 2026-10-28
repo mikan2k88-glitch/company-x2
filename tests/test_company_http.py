@@ -20,6 +20,20 @@ from company_x2.store import Store
 
 
 class CompanyHTTPTests(unittest.TestCase):
+    def test_quality_office_is_admin_read_only_and_separates_customer_validation(self):
+        for path in ('/quality','/api/company/quality'):
+            with self.assertRaises(urllib.error.HTTPError) as error:self.call(path,auth=False)
+            self.assertEqual(error.exception.code,401)
+        self.assertIn('品質・改善室',self.call('/quality',decode=False).decode())
+        report=self.call('/api/company/quality')
+        self.assertFalse(report['release_authority'])
+        self.assertFalse(report['projects'][0]['validation_complete'])
+        from company_x2.intake_access import public_issue
+        grant,_=public_issue('password','t'*32)
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.call('/api/company/quality',auth=False,headers={'X-Intake-Access':grant})
+        self.assertEqual(error.exception.code,403)
+
     def test_invited_template_http_rechecks_and_blocks_bypass(self):
         from company_x2.intake_access import public_issue, issue
         from company_x2.autonomy import FREE, AI
@@ -146,7 +160,7 @@ class CompanyHTTPTests(unittest.TestCase):
         payload.update(plan_sha256=plan['plan_sha256'],terms_accepted=True,request_key=key)
         return self.call('/api/company/transactions',payload)['id'],payload
     def test_http_contract_production_download_digest_and_receipt(self):
-        self.assertIn(b'E20',self.call('/company',decode=False))
+        self.assertIn(b'href="/quality"',self.call('/company',decode=False))
         order,payload=self.order()
         self.assertEqual(self.call('/api/company/transactions',payload)['id'],order)
         process_transaction(self.store)

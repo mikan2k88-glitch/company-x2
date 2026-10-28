@@ -15,6 +15,10 @@ from urllib.parse import urlencode
 
 
 def get_route(handler, path, store, ai, payments, scout_enabled):
+    if path == '/api/company/quality':
+        from .quality_office import report
+        handler.respond(200,report())
+        return True
     if path == '/api/intake/template/status':
         if not getattr(handler,'public_customer',False):
             handler.respond(403,{'error':'Free customer access required'})
