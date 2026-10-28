@@ -25,6 +25,19 @@ class HandoffTests(unittest.TestCase):
         self.assertNotIn('reply_text',value)
         self.assertEqual(value['status'],'awaiting_work_plan')
 
+    def test_recheck_uses_one_validated_snapshot_and_still_observes_source(self):
+        from unittest.mock import Mock
+        self.store.outreach_rpc=Mock(side_effect=[[dict(self.row)],[]])
+        client=Mock()
+        client.observe.return_value=dict(self.row)
+        self.assertTrue(recheck_contact(self.store,self.row['id'],'123',client)['source_rechecked'])
+        self.store.outreach_rpc.assert_called_once_with('list')
+        client.observe.assert_called_once_with(self.row)
+        # A subsequent independent check must fetch again, not cache consent.
+        with self.assertRaises(ValueError):recheck_contact(self.store,self.row['id'],'123',client)
+        self.assertEqual(self.store.outreach_rpc.call_count,2)
+        self.assertEqual(client.observe.call_count,1)
+
     def test_changed_reply_or_added_conditions_are_held(self):
         with self.assertRaises(ValueError):verified_contact(self.store,self.row['id'],'124')
         self.row['reply_text']+=' and deliver to a different account'
