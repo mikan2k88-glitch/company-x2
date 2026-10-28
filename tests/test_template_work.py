@@ -5,6 +5,32 @@ from company_x2.template_work import suggest
 
 
 class TemplateWorkTests(unittest.TestCase):
+    def test_wide_reordered_file_and_corrupted_serialization(self):
+        import csv
+        import io
+        from unittest.mock import patch
+        source_columns=['c'+str(i) for i in range(100)]
+        source_values=['00'+str(i) for i in range(100)]
+        source_values[7]='日本語, quoted'
+        buffer=io.StringIO(newline='')
+        writer=csv.writer(buffer);writer.writerow(source_columns);writer.writerow(source_values)
+        text=buffer.getvalue();columns=list(reversed(source_columns))
+        mapping={column:column for column in columns}
+        proposal=plan(text,columns,mapping)
+        result=execute(text,columns,mapping,[],proposal['plan_sha256'],True)
+        self.assertEqual(list(csv.reader(io.StringIO(result['csv'])))[1],list(reversed(source_values)))
+        real_writer=csv.writer
+        class CorruptWriter:
+            def __init__(self,*args,**kwargs):self.writer=real_writer(*args,**kwargs)
+            def writerow(self,row):return self.writer.writerow(row)
+            def writerows(self,rows):
+                for row in rows:
+                    changed=list(row);changed[0]='silently changed'
+                    self.writer.writerow(changed)
+        with patch('company_x2.template_work.csv.writer',CorruptWriter):
+            with self.assertRaisesRegex(ValueError,'Source preservation'):
+                execute(text,columns,mapping,[],proposal['plan_sha256'],True)
+
     def test_bilingual_mapping_and_ambiguous_source(self):
         data = {'purpose': 'Prepare product template', 'csv': 'sku,title\n001,Test\n',
                 'template_csv': '商品コード,商品名,価格\n',
