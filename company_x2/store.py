@@ -175,6 +175,20 @@ class Store:
             return [{**json.loads(r['data']), 'decision': r['decision'], 'reason': r['reason']}
                     for r in db.execute('select * from opportunities order by created_at desc limit 100')]
 
+    def customer_work(self,owner_hash,client_key=None):
+        from .owned_work import SOURCE,scope,checked_rows
+        identifier=scope(owner_hash,client_key)
+        query="select * from opportunities where source=? and json_extract(data,'$.owner_hash')=?"
+        args=[SOURCE,owner_hash]
+        if identifier:
+            query+=" and external_id=? and json_extract(data,'$.client_key')=?"
+            args.extend([identifier,client_key])
+        query+=' order by created_at desc,external_id limit 100'
+        with self.connect() as db:
+            rows=[{**json.loads(r['data']),'decision':r['decision'],'reason':r['reason']}
+                  for r in db.execute(query,args)]
+        return checked_rows(rows,owner_hash,client_key)
+
     def claim_scan(self):
         now = time.time()
         lease = secrets.token_urlsafe(24)
