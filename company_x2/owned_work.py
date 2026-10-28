@@ -19,6 +19,7 @@ def checked_rows(rows,owner_hash,client_key=None):
         raise ValueError('Invalid owned metadata response')
     for row in rows:
         if (not isinstance(row,dict) or row.get('source')!=SOURCE or row.get('owner_hash')!=owner_hash
+                or not isinstance(row.get('client_key'),str)
                 or (client_key is not None and row.get('client_key')!=client_key)
                 or row.get('external_id')!=scope(owner_hash,row.get('client_key'))):
             raise ValueError('Owned metadata scope mismatch')

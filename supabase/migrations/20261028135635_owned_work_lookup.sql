@@ -11,7 +11,7 @@ declare
  v_result jsonb;
 begin
  if p_action='ping' then return jsonb_build_object('owned_work_schema_version',1); end if;
- if p_action<>'lookup' or v_owner is null or v_owner !~ '^[a-f0-9]{64}$'
+ if p_action is distinct from 'lookup' or v_owner is null or v_owner !~ '^[a-f0-9]{64}$'
     or (v_key is not null and v_key !~ '^[A-Za-z0-9_-]{16,64}$') then
   raise exception 'Invalid owned work lookup' using errcode='22023';
  end if;
