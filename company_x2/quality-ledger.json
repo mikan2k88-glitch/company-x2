@@ -15,16 +15,16 @@
         },
         "tests": {
           "state": "verified",
-          "note": "268件失敗0、27件skip。実サイトの無人納品は対象外。",
+          "note": "276件失敗0、28件skip。所有者分離・古い依頼再取得を検証。実顧客検証とは別。",
           "evidence": [
-            "https://github.com/mikan2k88-glitch/company-x2/actions/runs/40697602918"
+            "https://github.com/mikan2k88-glitch/company-x2/actions/runs/40878222920"
           ]
         },
         "production": {
           "state": "verified",
-          "note": "PR70のRender Liveを確認。ブラウザ実送信は未導入。",
+          "note": "PR74 Render Liveと保存API version1・権限を確認。実顧客の本番再取得は未検証。ブラウザ実送信は未導入。",
           "evidence": [
-            "dep-dbgvkquq1p3s73bf41m0"
+            "dep-dbhl1b7avr4c73a0bq50"
           ]
         },
         "customers": {
@@ -38,11 +38,14 @@
           "id": "CX2-01",
           "priority": 1,
           "title": "所有者別の古い依頼取得",
-          "next_action": "専用RPCは適用・権限確認済み。呼び出し元切替の最終CIと本番反映を確認する。",
+          "next_action": "専用RPCと利用側の切替を反映。CI・本番デプロイ・権限確認を記録済み。",
           "acceptance": "100件超の他用途レコードがあっても本人の依頼を取得でき、他所有者は取得不可。",
-          "status": "in_progress",
+          "status": "resolved",
           "evidence": [
-            "https://github.com/mikan2k88-glitch/company-x2/pull/73"
+            "https://github.com/mikan2k88-glitch/company-x2/pull/73",
+            "https://github.com/mikan2k88-glitch/company-x2/pull/74",
+            "https://github.com/mikan2k88-glitch/company-x2/actions/runs/40878222920",
+            "dep-dbhl1b7avr4c73a0bq50"
           ]
         },
         {
