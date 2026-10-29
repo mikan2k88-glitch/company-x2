@@ -18,6 +18,12 @@ def records(store):
     return [x for x in store.opportunities() if x.get('source') == SOURCE]
 
 
+def record_for(store,key):
+    lookup=getattr(store,'get_work_record',None)
+    if lookup is not None:return lookup(key)
+    return next((r for r in records(store) if r['external_id']==key),None)
+
+
 def save(store, record):
     record['updated_at'] = datetime.now(timezone.utc).isoformat()
     store.save_opportunity(record, 'blocked', 'Internal template experiment; not a hiring opportunity')
@@ -29,7 +35,7 @@ def request(store, data):
         raise ValueError('Request key required')
     proposal = safe_request(data)
     with LOCK:
-        previous = next((r for r in records(store) if r['external_id'] == key), None)
+        previous = record_for(store,key)
         if previous:
             if previous['approval_sha256'] != proposal['approval_sha256']:
                 raise ValueError('Request key already belongs to a different plan')
@@ -51,7 +57,7 @@ def process(store, data):
     if proposal['plan']['questions']:
         raise ValueError('Questions must be resolved first')
     with LOCK:
-        record = next((r for r in records(store) if r['external_id'] == data.get('request_key')), None)
+        record = record_for(store,data.get('request_key'))
         if not record or record['approval_sha256'] != proposal['approval_sha256']:
             raise ValueError('Stored request does not match')
         if record['status'] not in ('awaiting_consent', 'ready'):
@@ -80,7 +86,7 @@ def process(store, data):
 
 def receive(store, data):
     with LOCK:
-        record = next((r for r in records(store) if r['external_id'] == data.get('request_key')), None)
+        record = record_for(store,data.get('request_key'))
         if not record or record['status'] not in ('ready', 'received'):
             raise ValueError('Verified artifact required')
         if data.get('artifact_sha256') != record.get('artifact_sha256'):

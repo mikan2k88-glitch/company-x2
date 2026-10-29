@@ -55,7 +55,7 @@ def bind_request(store, grant, signing_key, reply_id, client, owner, request_key
     scoped = template_customer.OwnedStore(store, owner)
     binding = {key: manifest[key] for key in ('contact_id', 'reply_id', 'consent_sha256')}
     with public_intake.LOCK, template_session.LOCK:
-        record = next((r for r in scoped.opportunities() if r['external_id'] == request_key), None)
+        record = scoped.get_work_record(request_key)
         if not record or record['status'] != 'awaiting_consent':
             raise ValueError('Reserved owner-scoped plan required')
         if record.get('handoff') and record['handoff'] != binding:
@@ -67,8 +67,7 @@ def bind_request(store, grant, signing_key, reply_id, client, owner, request_key
 
 def process_request(store, grant, signing_key, reply_id, client, owner, data):
     from . import template_customer
-    record = next((r for r in template_customer.OwnedStore(store, owner).opportunities()
-                   if r['external_id'] == data.get('request_key')), None)
+    record = template_customer.OwnedStore(store, owner).get_work_record(data.get('request_key'))
     if not record or not record.get('handoff'):
         raise ValueError('Bound source handoff required')
     return template_customer.process(store, data, owner,
