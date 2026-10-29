@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "reviewed_on": "2026-10-28",
+  "reviewed_on": "2026-10-29",
   "projects": [
     {
       "id": "company-x2",
@@ -38,10 +38,12 @@
           "id": "CX2-01",
           "priority": 1,
           "title": "所有者別の古い依頼取得",
-          "next_action": "owner filterより前の全体100件上限を直接取得へ置き換える",
+          "next_action": "専用RPCは適用・権限確認済み。呼び出し元切替の最終CIと本番反映を確認する。",
           "acceptance": "100件超の他用途レコードがあっても本人の依頼を取得でき、他所有者は取得不可。",
-          "status": "open",
-          "evidence": []
+          "status": "in_progress",
+          "evidence": [
+            "https://github.com/mikan2k88-glitch/company-x2/pull/73"
+          ]
         },
         {
           "id": "CX2-02",

@@ -7,8 +7,7 @@ from .work_handoff import process_request
 def prepare_delivery(store,grant,signing_key,reply_id,client,owner,data,*,destination):
     """Destination is supplied by operator configuration, never customer input."""
     with public_intake.LOCK, template_session.LOCK:
-        record=next((r for r in template_customer.OwnedStore(store,owner).opportunities()
-                     if r['external_id']==data.get('request_key')),None)
+        record=template_customer.OwnedStore(store,owner).get_work_record(data.get('request_key'))
         if not record or record['status'] not in ('ready','received') or not record.get('handoff'):
             raise ValueError('Previously verified source-bound artifact required')
         if record.get('issue_count')!=0:raise ValueError('Unresolved artifact inspection issues')

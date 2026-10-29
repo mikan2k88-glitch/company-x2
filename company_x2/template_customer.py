@@ -54,10 +54,17 @@ class OwnedStore:
 
     def opportunities(self):
         # Experiments and other customers cannot enter the session namespace.
-        return [{**copy.deepcopy(r), 'source': template_session.SOURCE, 'external_id': r['client_key'], 'experimental': False,
-                 'status': 'ready' if self.replay_received and r['status'] == 'received' else r['status']}
-                for r in self.store.opportunities()
-                if r.get('source') == SOURCE and r.get('owner_hash') == self.digest]
+        return [self._normalize(r) for r in self.store.customer_work(self.digest)]
+
+    def _normalize(self,record):
+        return {**copy.deepcopy(record),'source':template_session.SOURCE,
+            'external_id':record['client_key'],'experimental':False,
+            'status':'ready' if self.replay_received and record['status']=='received' else record['status']}
+
+    def get_work_record(self,key):
+        if not isinstance(key,str):raise ValueError('Customer request key required')
+        rows=self.store.customer_work(self.digest,key)
+        return self._normalize(rows[0]) if rows else None
 
     def save_opportunity(self, record, decision, reason):
         record.setdefault('created_at', datetime.now(timezone.utc).isoformat())
@@ -75,8 +82,7 @@ def request(store, data, owner):
     proposal = safe_request(data)
     scoped = OwnedStore(store, owner)
     with public_intake.LOCK, template_session.LOCK:
-        previous = next((r for r in scoped.opportunities()
-                         if r['external_id'] == data.get('request_key')), None)
+        previous = scoped.get_work_record(data.get('request_key'))
         if previous:
             return public_record(template_session.request(scoped, data))
         if proposal['plan']['questions']:
@@ -113,8 +119,7 @@ def process(store, data, owner, *, handoff_check=None):
     scoped = OwnedStore(store, owner, replay_received=True)
     with public_intake.LOCK, template_session.LOCK:
         from .free_trial import require_open
-        existing = next((r for r in scoped.opportunities()
-                         if r['external_id'] == data.get('request_key')), None)
+        existing = scoped.get_work_record(data.get('request_key'))
         if existing and existing.get('handoff'):
             if handoff_check is None:
                 raise ValueError('Verified source handoff required')
